@@ -1,0 +1,32 @@
+{
+    "geometry": {
+        "cylinder_radius": 2.0,
+        "type": "cylinder",
+        "type_options" : {
+            "airfoil" : "joukowski airfoil (requires design C_L and design thickness", 
+            "cylinder" : "joukowski cylinder (requires epsilon, zeta_0, and vortex_strength)"
+        },
+        "epsilon": 0.3,
+        "zeta_0": [-0.25,0.25],
+        "design_CL": 0.261,
+        "design_thickness": 0.12,
+        "output_points": 1000
+    },
+    "operating": {
+        "freestream_velocity": 10.0,
+        "angle_of_attack[deg]": 0.0,
+        "vortex_strength": 15.0
+    },
+    "plot": {
+        "x_lower_limit": -6.0,
+        "x_upper_limit":  6.0,
+        "x_start":       -6.0,
+        "delta_s": 0.01,
+        "n_lines": 20,
+        "delta_y": 0.4,
+        "do_plot_streamlines": true,
+        "plot_text": false,
+        "save_fig": true,
+        "show_fig": false
+    }
+}
