@@ -135,7 +135,6 @@ def symbolically_differentiate(expression: str, variable: str):
     if not isinstance(variable, str):
         raise TypeError("The variable must be a string. Please provide a string value.")
     # differentiate the expression
-    # differentiation is when you find the rate at which a quantity changes with respect to another quantity
     differentiated_expression = sympy.diff(expression, variable)
     return differentiated_expression
 
@@ -156,7 +155,6 @@ def symbolically_integrate(expression: str, variable: str):
     if not isinstance(variable, str):
         raise TypeError("The variable must be a string. Please provide a string value.")
     # integrate the expression
-    # integration is when you find the area under a curve
     integrated_expression = sympy.integrate(expression, variable)
     return integrated_expression
 
@@ -177,7 +175,6 @@ def symbolically_solve(expression: str, variable: str):
     if not isinstance(variable, str):
         raise TypeError("The variable must be a string. Please provide a string value.")
     # solve the expression
-    # solving is when you find the value of a variable that makes the equation true
     solved_expression = sympy.solve(expression, variable)
     return solved_expression
 
@@ -194,24 +191,6 @@ def symbolically_vectorize(expression: str):
     if not isinstance(expression, str):
         raise TypeError("The expression must be a string. Please provide a string value.")
     # vectorize the expression
-    # vectorization is when you convert a scalar expression into a vector expression
-    vectorized_expression = sympy.Matrix([expression])
-    return vectorized_expression
-
-def symbolically_complex_vectorize(expression: str):
-    """This function symbolically vectorizes a given expression.
-
-    Args:
-        - expression (str): A string representing the expression to be vectorized.
-
-    Returns:
-        str: A string representing the vectorized expression.
-    """
-    # make sure that expression is a string
-    if not isinstance(expression, str):
-        raise TypeError("The expression must be a string. Please provide a string value.")
-    # vectorize the expression
-    # vectorization is when you convert a scalar expression into a vector expression
     vectorized_expression = sympy.Matrix([expression])
     return vectorized_expression
 
@@ -233,42 +212,110 @@ def string_to_latex(expression: str):
 
 if __name__ == "__main__":
     # Define symbols
-    V_inf, alpha, Gamma, zeta, zeta0, eta, etao, xi, xio, R, eps, Pie = symbols(
-        'V_inf alpha Gamma zeta zeta0 eta etao xi xio R eps Pie', real=True
+    V_inf, alpha, Gamma, zeta, zeta0, eta, etao, xi, xio, R, eps, Pie, r, r0, theta, theta0 = symbols(
+        'V_inf alpha Gamma zeta zeta0 eta etao xi xio R eps Pie, r, r0, theta, theta0', real=True
     )
     i = I  # Complex unit
-    # Define the complex expression (replace with your full expression)
-    w_omega = V_inf*((cos(alpha)-i*sin(alpha))+i*(Gamma/(2*Pie*V_inf)) * (
-                1 / ((xi + i * eta) - (xio + i * etao)))-((R**2*(cos(alpha)+i*sin(alpha)))/((xi+i*eta)-(xio+i*etao))**2))/(1-((R-eps)**2/(xi+i*eta)**2))
-    # Split into real and imaginary parts
-    real_part = re(w_omega)
-    imag_part = im(w_omega)
 
-    # make the real and imaginary parts into strings
-    real_part = str(real_part)
-    imag_part = str(imag_part)
+    # G1 and G2 Expressions 
+    G1 = (r*sin(theta) - r0*sin(theta0))/(r**2 + r0**2 - 2*r*r0*cos(theta - theta0))
+    G2 = (r*cos(theta) - r0*cos(theta0))/(r**2 + r0**2 - 2*r*r0*cos(theta - theta0))
+    # make G1 and G2 into strings
+    # G1 = str(G1)
+    # G2 = str(G2)
+    # simplify G1 and G2
+    # G1_simplified = symbolically_simplify(G1)
+    # G2_simplified = symbolically_simplify(G2)
+    # print("\nG1:", G1) # this is already simplified
+    # print("\nG2:", G2) # this is already simplified
 
-    # Print the results
-    print("\nReal Part:", real_part)
-    print("Type of Real Part:", type(real_part))
-    print("\nImaginary Part:", imag_part)
-    print("Type of Imaginary Part:", type(imag_part))
-    print("\n")
+
+    # G3 and G4 Expressions
+    Numerator = R**2*((cos(alpha)+i*sin(alpha))*((r**2*cos(2*theta)-2*r*r0*cos(theta+theta0)+r0**2*cos(2*theta0))-i*(r**2*sin(2*theta)-2*r*r0*sin(theta+theta0)+r0**2*sin(2*theta0))))
+    Denom = (r**2*cos(2*theta)-2*r*r0*cos(theta+theta0)+r0**2*cos(2*theta0))**2 + (r**2*sin(2*theta)-2*r*r0*sin(theta+theta0)+r0**2*sin(2*theta0))**2
+    Expression = (Numerator)/Denom
+
+    real_expression = re(Expression)
+    imag_expression = im(Expression)
+    # make expressions into strings 
+    # G3 = str(real_expression)
+    # G4 = str(imag_expression)
+    # print the real and imaginary parts
+    # print("\nReal Part:", real_expression)
+    # print("\nImaginary Part:", imag_expression)
 
     # simplify the real part
-    # simplified_real_part = symbolically_simplify(real_part)
-    # print("Simplified Real Part:", simplified_real_part)
-    latex_real_part = string_to_latex("(eta**2 + xi**2)**2*(eta*xi*(R - eps)**2*(Gamma*(xi - xio)*((eta - etao)**2 + (xi - xio)**2) + 2*Pie*R**2*V_inf*(2*(eta - etao)*(xi - xio)*cos(alpha) + ((-eta + etao)**2 - (xi - xio)**2)*sin(alpha)) - 2*Pie*V_inf*((eta - etao)**2 + (xi - xio)**2)**2*sin(alpha)) + ((R - eps)**2*(eta**2 - xi**2) + (eta**2 + xi**2)**2)*(Gamma*(eta - etao)*((eta - etao)**2 + (xi - xio)**2) + 2*Pie*R**2*V_inf*(-2*(eta - etao)*(xi - xio)*sin(alpha) + ((-eta + etao)**2 - (xi - xio)**2)*cos(alpha)) + 2*Pie*V_inf*((eta - etao)**2 + (xi - xio)**2)**2*cos(alpha))/2)/(Pie*(4*eta**2*xi**2*(R - eps)**4 + ((R - eps)**2*(eta**2 - xi**2) + (eta**2 + xi**2)**2)**2)*((eta - etao)**2 + (xi - xio)**2)**2)")
-    # retrieve the latex version of the simplified real part
-    print("\nLatex Real Part:", latex_real_part)
+    # real_simplified_complex_polar_velocity = symbolically_simplify(G3)
+    G3 =  R**2*(2*r**2*sin(theta)*sin(alpha - theta) + r**2*cos(alpha) - 2*r*r0*cos(-alpha + theta + theta0) + 2*r0**2*sin(theta0)*sin(alpha - theta0) + r0**2*cos(alpha))/((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2)
+    # simplify the imaginary part
+    # imag_simplified_complex_polar_velocity = symbolically_simplify(G4)
+    G4 =  R**2*(r**2*sin(alpha) - 2*r**2*sin(theta)*cos(alpha - theta) + 2*r*r0*sin(-alpha + theta + theta0) + r0**2*sin(alpha) - 2*r0**2*sin(theta0)*cos(alpha - theta0))/((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2)
+    # print("\nG3:", G3)
+    # print("\nG4:", G4)
+
+    G56 = 1 - ((R-eps)**2*(r**2*cos(2*theta)-i*r**2*sin(2*theta)))/((r**2*cos(2*theta))**2+(r**2*sin(2*theta))**2)
+    G5 = re(G56)
+    G6 = im(G56)
+    # make expressions into strings
+    G5 = str(G5)
+    G6 = str(G6)
+    # simplify the real part
+    G5 = 1 - ((R - eps)**2*cos(2*theta))/r**2
+    # simplify the imaginary part
+    G6 = ((R - eps)**2*sin(2*theta))/r**2
+    # print("G56:", G56)
+    # print("\nG5:", G5)
+    # print("\nG6:", G6)
+
+    # print("\n")
+
+    # Squared_terms = (1 - ((R - eps)**2*cos(2*theta))/r**2)**2 + (((R - eps)**2*sin(2*theta))/r**2)**2
+    # Squared_terms = str(Squared_terms)
+    # # simplify the squared terms
+    # Squared_terms = symbolically_simplify(Squared_terms)
+    # print("\nSquared Terms:", Squared_terms)
+
+    # full_real_expression = (V_inf*(G5*(cos(alpha)+G1-G3)+G6*(G2-sin(alpha)-G4)))/(G5**2+G6**2)
+    full_real_expression = V_inf*((1 - ((R-eps)**2*(cos(2*theta)))/(r**2))*(cos(alpha)+(Gamma*(r*sin(theta)-r0*sin(theta0))/(2*Pie*V_inf*(r**2 + r0**2 - 2*r*r0*cos(theta-theta0))))-(R**2*(2*r**2*sin(theta)*sin(alpha - theta) + r**2*cos(alpha) - 2*r*r0*cos(-alpha + theta + theta0) + 2*r0**2*sin(theta0)*sin(alpha - theta0) + r0**2*cos(alpha))/((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2)))+(((R-eps)**2*(sin(2*theta)))/(r**2))*((Gamma*(r*cos(theta)-r0*cos(theta0))/(2*Pie*V_inf*(r**2 + r0**2 - 2*r*r0*cos(theta-theta0))))-sin(alpha)-((R**2*(r**2*sin(alpha)-2*r**2*sin(theta)*cos(alpha-theta)+2*r*r0*sin(-alpha+theta+theta0)+r0**2*sin(alpha)-2*r0**2*sin(theta0)*cos(alpha-theta0)))/((r**2*cos(2*theta) - 2*r*r0*cos(theta+theta0) + r0**2*cos(2*theta0))**2 + (r**2*sin(2*theta) - 2*r*r0*sin(theta+theta0) + r0**2*sin(2*theta0))**2))))/((1 - ((R-eps)**2*(cos(2*theta)))/(r**2))**2 + (((R-eps)**2*(sin(2*theta)))/(r**2))**2)
+    full_real_expression = str(full_real_expression)
+    # simplify the real part
+    print("Finding a simplified real expression...")
+    # real_simplified_complex_cartesian_velocity = symbolically_simplify(full_real_expression)
+    # print("\nReal Part:\n", real_simplified_complex_cartesian_velocity)
+    V_real =  r**2*(-(R - eps)**2*(-Gamma*(r*cos(theta) - r0*cos(theta0))*((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2) + 2*Pie*R**2*V_inf*(r**2 - 2*r*r0*cos(theta - theta0) + r0**2)*(r**2*sin(alpha) - 2*r**2*sin(theta)*cos(alpha - theta) + 2*r*r0*sin(-alpha + theta + theta0) + r0**2*sin(alpha) - 2*r0**2*sin(theta0)*cos(alpha - theta0)) + 2*Pie*V_inf*((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2)*(r**2 - 2*r*r0*cos(theta - theta0) + r0**2)*sin(alpha))*sin(2*theta) + (r**2 - (R - eps)**2*cos(2*theta))*(Gamma*(r*sin(theta) - r0*sin(theta0))*((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2) - 2*Pie*R**2*V_inf*(r**2 - 2*r*r0*cos(theta - theta0) + r0**2)*(2*r**2*sin(theta)*sin(alpha - theta) + r**2*cos(alpha) - 2*r*r0*cos(-alpha + theta + theta0) + 2*r0**2*sin(theta0)*sin(alpha - theta0) + r0**2*cos(alpha)) + 2*Pie*V_inf*((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2)*(r**2 - 2*r*r0*cos(theta - theta0) + r0**2)*cos(alpha)))/(2*Pie*((R - eps)**4*sin(2*theta)**2 + (r**2 - (R - eps)**2*cos(2*theta))**2)*((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2)*(r**2 - 2*r*r0*cos(theta - theta0) + r0**2))
+    print("\nReal Part:\n", V_real)
+
+    # full_imag_expression = (V_inf*(G5*(G2-sin(alpha)-G4)-G6*(cos(alpha)+G1-G3)))/(G5**2+G6**2)
+    full_imag_expression = -V_inf*((1 - ((R-eps)**2*(cos(2*theta)))/(r**2))*((Gamma*(r*cos(theta)-r0*cos(theta0))/(2*Pie*V_inf*(r**2 + r0**2 - 2*r*r0*cos(theta-theta0))))-sin(alpha)-((R**2*(r**2*sin(alpha)-2*r**2*sin(theta)*cos(alpha-theta)+2*r*r0*sin(-alpha+theta+theta0)+r0**2*sin(alpha)-2*r0**2*sin(theta0)*cos(alpha-theta0)))/((r**2*cos(2*theta) - 2*r*r0*cos(theta+theta0) + r0**2*cos(2*theta0))**2 + (r**2*sin(2*theta) - 2*r*r0*sin(theta+theta0) + r0**2*sin(2*theta0))**2)))-(((R-eps)**2*(sin(2*theta)))/(r**2))*(cos(alpha)+(Gamma*(r*sin(theta)-r0*sin(theta0))/(2*Pie*V_inf*(r**2 + r0**2 - 2*r*r0*cos(theta-theta0))))-(R**2*(2*r**2*sin(theta)*sin(alpha - theta) + r**2*cos(alpha) - 2*r*r0*cos(-alpha + theta + theta0) + 2*r0**2*sin(theta0)*sin(alpha - theta0) + r0**2*cos(alpha))/((r**2*sin(2*theta) - 2*r*r0*sin(theta + theta0) + r0**2*sin(2*theta0))**2 + (r**2*cos(2*theta) - 2*r*r0*cos(theta + theta0) + r0**2*cos(2*theta0))**2))))/((1 - ((R-eps)**2*(cos(2*theta)))/(r**2))**2 + (((R-eps)**2*(sin(2*theta)))/(r**2))**2)
+    full_imag_expression = str(full_imag_expression)
+    # simplify the imaginary part
+    print("\nFinding a simplified imaginary expression...")
+    imag_simplified_complex_cartesian_velocity = symbolically_simplify(full_imag_expression)
+    print("\nImaginary Part:\n", imag_simplified_complex_cartesian_velocity)
+
+    # Define the complex expression (replace with your full expression)
+    # w_omega = V_inf*((cos(alpha)-i*sin(alpha))+i*(Gamma/(2*Pie*V_inf)) * (
+    #             1 / ((xi + i * eta) - (xio + i * etao)))-((R**2*(cos(alpha)+i*sin(alpha)))/((xi+i*eta)-(xio+i*etao))**2))/(1-((R-eps)**2/(xi+i*eta)**2))
+    # # Split into real and imaginary parts
+    # real_part = re(w_omega)
+    # imag_part = im(w_omega)
+
+    # # make the real and imaginary parts into strings
+    # real_part = str(real_part)
+    # imag_part = str(imag_part)
+
+    # # Print the results
+    # print("\nReal Part:", real_part)
+    # print("Type of Real Part:", type(real_part))
+    # print("\nImaginary Part:", imag_part)
+    # print("Type of Imaginary Part:", type(imag_part))
+    # print("\n")
+
+
+    # simplify the real part
+    # real_simplified_complex_cartesian_velocity = symbolically_simplify(real_part)
+    # real_simplified_complex_cartesian_velocity = "(eta**2 + xi**2)**2*(eta*xi*(R - eps)**2*(Gamma*(xi - xio)*((eta - etao)**2 + (xi - xio)**2) + 2*Pie*R**2*V_inf*(2*(eta - etao)*(xi - xio)*cos(alpha) + ((-eta + etao)**2 - (xi - xio)**2)*sin(alpha)) - 2*Pie*V_inf*((eta - etao)**2 + (xi - xio)**2)**2*sin(alpha)) + ((R - eps)**2*(eta**2 - xi**2) + (eta**2 + xi**2)**2)*(Gamma*(eta - etao)*((eta - etao)**2 + (xi - xio)**2) + 2*Pie*R**2*V_inf*(-2*(eta - etao)*(xi - xio)*sin(alpha) + ((-eta + etao)**2 - (xi - xio)**2)*cos(alpha)) + 2*Pie*V_inf*((eta - etao)**2 + (xi - xio)**2)**2*cos(alpha))/2)/(Pie*(4*eta**2*xi**2*(R - eps)**4 + ((R - eps)**2*(eta**2 - xi**2) + (eta**2 + xi**2)**2)**2)*((eta - etao)**2 + (xi - xio)**2)**2)" 
 
     # simplify the imaginary part
-    # simplified_imag_part = symbolically_simplify(imag_part)
-    # print("\nSimplified Imaginary Part:", simplified_imag_part)
-    latex_imag_part = string_to_latex("(eta**2 + xi**2)**2*(-eta*xi*(R - eps)**2*(Gamma*(eta - etao)*((eta - etao)**2 + (xi - xio)**2) + 2*Pie*R**2*V_inf*(-2*(eta - etao)*(xi - xio)*sin(alpha) + ((-eta + etao)**2 - (xi - xio)**2)*cos(alpha)) + 2*Pie*V_inf*((eta - etao)**2 + (xi - xio)**2)**2*cos(alpha)) + ((R - eps)**2*(eta**2 - xi**2) + (eta**2 + xi**2)**2)*(Gamma*(xi - xio)*((eta - etao)**2 + (xi - xio)**2) + 2*Pie*R**2*V_inf*(2*(eta - etao)*(xi - xio)*cos(alpha) + ((-eta + etao)**2 - (xi - xio)**2)*sin(alpha)) - 2*Pie*V_inf*((eta - etao)**2 + (xi - xio)**2)**2*sin(alpha))/2)/(Pie*(4*eta**2*xi**2*(R - eps)**4 + ((R - eps)**2*(eta**2 - xi**2) + (eta**2 + xi**2)**2)**2)*((eta - etao)**2 + (xi - xio)**2)**2)")
-    # retrieve the latex version of the simplified imaginary part
-    print("\nLatex Imaginary Part:", latex_imag_part)
-
-
-    
-
+    # imag_simplified_complex_cartesian_velocity = symbolically_simplify(imag_part)
+    # imag_simplified_complex_cartesian_velocity = "(eta**2 + xi**2)**2*(-eta*xi*(R - eps)**2*(Gamma*(eta - etao)*((eta - etao)**2 + (xi - xio)**2) + 2*Pie*R**2*V_inf*(-2*(eta - etao)*(xi - xio)*sin(alpha) + ((-eta + etao)**2 - (xi - xio)**2)*cos(alpha)) + 2*Pie*V_inf*((eta - etao)**2 + (xi - xio)**2)**2*cos(alpha)) + ((R - eps)**2*(eta**2 - xi**2) + (eta**2 + xi**2)**2)*(Gamma*(xi - xio)*((eta - etao)**2 + (xi - xio)**2) + 2*Pie*R**2*V_inf*(2*(eta - etao)*(xi - xio)*cos(alpha) + ((-eta + etao)**2 - (xi - xio)**2)*sin(alpha)) - 2*Pie*V_inf*((eta - etao)**2 + (xi - xio)**2)**2*sin(alpha))/2)/(Pie*(4*eta**2*xi**2*(R - eps)**4 + ((R - eps)**2*(eta**2 - xi**2) + (eta**2 + xi**2)**2)**2)*((eta - etao)**2 + (xi - xio)**2)**2)" 

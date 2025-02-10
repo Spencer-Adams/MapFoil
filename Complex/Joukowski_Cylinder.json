@@ -24,9 +24,9 @@
         "delta_s": 0.01,
         "n_lines": 20,
         "delta_y": 0.4,
-        "do_plot_streamlines": true,
+        "do_plot_streamlines": false,
         "plot_text": false,
-        "save_fig": true,
+        "save_fig": false,
         "show_fig": false
     }
 }
