@@ -186,48 +186,25 @@ class cylinder(potential_flow_object):
         velocity_complex = np.array([velocity.real, -velocity.imag])
         print("real velocity", velocity_complex[0])
         print("imag velocity", velocity_complex[1])
-        velocity_r = velocity_complex[0]*np.cos(theta) + velocity_complex[1]*np.sin(theta)
-        velocity_theta = velocity_complex[1]*np.cos(theta) - velocity_complex[0]*np.sin(theta)
+        # velocity_r = velocity_complex[0]*np.cos(theta) + velocity_complex[1]*np.sin(theta)
+        # velocity_theta = velocity_complex[1]*np.cos(theta) - velocity_complex[0]*np.sin(theta)
         # print("radial velocity", velocity_r)
         # print("theta velocity", velocity_theta)
         return velocity_complex
     
-    # def alternative_velocity(self, point_xy_in_z_plane):
-    #     """This function calculates the velocity at a given point in the flow field in the z plane"""
-    #     z = point_xy_in_z_plane[0] + 1j*point_xy_in_z_plane[1]
-    #     zeta = self.z_to_zeta(z)
-    #     xi = zeta.real
-    #     eta = zeta.imag
-    #     zeta_center = self.zeta_center
-    #     xio = zeta_center.real
-    #     etao = zeta_center.imag
-    #     V_inf = self.freestream_velocity
-    #     Gamma = self.circulation
-    #     R = self.cylinder_radius
-    #     alpha = self.angle_of_attack
-    #     epsilon = self.epsilon
-    #     G1 = Gamma*(eta-etao)/(2*np.pi*V_inf*((xi-xio)**2 + (eta-etao)**2))
-    #     G2 = Gamma*(xi-xio)/(2*np.pi*V_inf*((xi-xio)**2 + (eta-etao)**2))
-    #     G3 = (R**2*(np.cos(alpha)*((xi-xio)**2-(eta-etao)**2)+2*np.sin(alpha)*((xi-xio)*(eta-etao))))/(((xi-xio)**2-(eta-etao)**2)**2+(2*(xi-xio)*(eta-etao))**2)
-    #     G4 = (R**2*(np.sin(alpha)*((xi-xio)**2-(eta-etao)**2)-2*np.cos(alpha)*((xi-xio)*(eta-etao))))/(((xi-xio)**2-(eta-etao)**2)**2+(2*(xi-xio)*(eta-etao))**2)
-    #     G5 = 1 - ((xi**2-eta**2)*(R-epsilon)**2)/((xi**2-eta**2)**2+(2*xi*eta)**2)
-    #     G6 = ((2*xi*eta)*(R-epsilon)**2)/((xi**2-eta**2)**2+(2*xi*eta)**2)
-    #     G7 = np.cos(alpha) + G1 - G3
-    #     G8 = G2 - np.sin(alpha) - G4
-    #     G9 = (G5**2 + G6**2)
-    #     velocity = V_inf*(G7*G5+G8*G6)/(G9) - 1j*V_inf*(G8*G5-G7*G6)/(G9)
-    #     velocity_complex = np.array([velocity.real, velocity.imag])
-    #     pressure = 1 - (np.dot(velocity_complex,velocity_complex))/(V_inf**2)
-    #     alternative_pressure = 1 - ((G7*G5+G8*G6)/(G9))**2 + ((G8*G5-G7*G6)/(G9))**2
-    #     return velocity_complex
-    
-    def Chi_velocity(self, Chi):
-        """Start with a Chi value that"""
-        xi = Chi.real
-        eta = Chi.imag
+    def Chi_velocity(self, point_xy_in_Chi_plane):
+        """Start with a Chi value that is shifted from zeta_center"""
+        Chi_real = point_xy_in_Chi_plane[0]
+        Chi_imag = point_xy_in_Chi_plane[1]
+        xi = Chi_real
+        eta = Chi_imag
+        r = np.sqrt(xi**2 + eta**2)
+        theta = np.arctan2(eta, xi)
         zeta_center = self.zeta_center
         xio = zeta_center.real
         etao = zeta_center.imag
+        r0 = np.sqrt(xio**2 + etao**2)
+        theta0 = np.arctan2(etao, xio)
         V_inf = self.freestream_velocity
         Gamma = self.circulation
         R = self.cylinder_radius
@@ -235,62 +212,33 @@ class cylinder(potential_flow_object):
         epsilon = self.epsilon
         omega_chi_unsplit = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(xi+1j*eta)) - np.exp(1j*alpha)*R**2/(xi+1j*eta)**2) / (1 - (R-epsilon)**2/(xi+xio+1j*(eta+etao))**2)
         velocity_complex = np.array([omega_chi_unsplit.real, -omega_chi_unsplit.imag])
-        G1 = eta/(xi**2 + eta**2)
-        G2 = xi/(xi**2 + eta**2)
-        G3 = R**2*(np.cos(alpha)*(xi**2-eta**2)+2*xi*eta*np.sin(alpha))/((xi**2-eta**2)**2+(4*xi**2*eta**2))
-        G4 = R**2*(np.sin(alpha)*(xi**2-eta**2)-2*xi*eta*np.cos(alpha))/((xi**2-eta**2)**2+(4*xi**2*eta**2))
-        G5 = 1 - ((R-epsilon)**2*((xi+xio)**2 - (eta+etao)**2))/(((xi+xio)**2 - (eta+etao)**2)**2 + (2*(xi+xio)*(eta+etao))**2)
-        G6 = ((R-epsilon)**2*(2*(xi+xio)*(eta+etao)))/(((xi+xio)**2 - (eta+etao)**2)**2 + (2*(xi+xio)*(eta+etao))**2)
+        # G1 = eta/(xi**2 + eta**2)
+        G1 = np.sin(theta)/r # this is the same as the above line
+        # G2 = xi/(xi**2 + eta**2)
+        G2 = np.cos(theta)/r # this is the same as the above line
+        # G3 = R**2*(np.cos(alpha)*(xi**2-eta**2)+2*xi*eta*np.sin(alpha))/((xi**2-eta**2)**2+(4*xi**2*eta**2))
+        G3 = R**2*(r**2*np.cos(alpha)*np.cos(2*theta)+r**2*np.sin(alpha)*np.sin(2*theta))/((r**2*np.cos(2*theta))**2+0.5*r**4*(1-np.cos(4*theta))) # this is the same as the above line
+        # G4 = R**2*(np.sin(alpha)*(xi**2-eta**2)-2*xi*eta*np.cos(alpha))/((xi**2-eta**2)**2+(4*xi**2*eta**2))
+        G4 = R**2*(r**2*np.sin(alpha)*np.cos(2*theta)-r**2*np.cos(alpha)*np.sin(2*theta))/((r**2*np.cos(2*theta))**2+0.5*r**4*(1-np.cos(4*theta))) # this is the same as the above line
+        # G5 = 1 - ((R-epsilon)**2*((xi+xio)**2 - (eta+etao)**2))/(((xi+xio)**2 - (eta+etao)**2)**2 + (2*(xi+xio)*(eta+etao))**2)
+        G5 = 1 - ((R-epsilon)**2*(r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2) # this is the same as the above line
+        # G6 = ((R-epsilon)**2*(2*(xi+xio)*(eta+etao)))/(((xi+xio)**2 - (eta+etao)**2)**2 + (2*(xi+xio)*(eta+etao))**2)
+        G6 = ((R-epsilon)**2*(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2) # this is the same as the above line
         V_real = (Gamma/(2*np.pi))*((G1*G5+G2*G6)/(G5**2 + G6**2)) + V_inf*((G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
         V_imag = (-1*Gamma/(2*np.pi))*((G2*G5-G1*G6)/(G5**2 + G6**2)) + V_inf*((G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
-        print("real velocityCC", V_real)
-        print("imag velocityCC", V_imag)
-        return velocity_complex
-    
-    def polar_velocity(self, point_xy_in_z_plane):
-        """This function calculates the velocity at a given point in the flow field in the z plane in polar coordinates"""
-        z = point_xy_in_z_plane[0] + 1j*point_xy_in_z_plane[1]
-        zeta = self.z_to_zeta(z)
-        xi = zeta.real
-        eta = zeta.imag
-        zeta_center = self.zeta_center
-        xio = zeta_center.real
-        etao = zeta_center.imag
-        r = np.sqrt(xi**2 + eta**2)
-        r0 = np.sqrt(xio**2 + etao**2)
-        theta = np.arctan2(eta, xi)
-        theta0 = np.arctan2(etao, xio)
-        V_inf = self.freestream_velocity
-        Gamma = self.circulation
-        R = self.cylinder_radius
-        alpha = self.angle_of_attack
-        epsilon = self.epsilon
-        eps = epsilon 
-        # G1 = Gamma*(r*np.sin(theta)-r0*np.sin(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0)))
-        G1 = (r*np.sin(theta)-r0*np.sin(theta0))/((r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0)))
-        # G2 = Gamma*(r*np.cos(theta)-r0*np.cos(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0)))
-        G2 = (r*np.cos(theta)-r0*np.cos(theta0))/((r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0)))
-        G3 =  R**2*(2*r**2*np.sin(theta)*np.sin(alpha - theta) + r**2*np.cos(alpha) - 2*r*r0*np.cos(-alpha + theta + theta0) + 2*r0**2*np.sin(theta0)*np.sin(alpha - theta0) + r0**2*np.cos(alpha))/((r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta + theta0) + r0**2*np.sin(2*theta0))**2 + (r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta + theta0) + r0**2*np.cos(2*theta0))**2)
-        G4 = (R**2*(r**2*np.sin(alpha)-2*r**2*np.sin(theta)*np.cos(alpha-theta)+2*r*r0*np.sin(-alpha+theta+theta0)+r0**2*np.sin(alpha)-2*r0**2*np.sin(theta0)*np.cos(alpha-theta0)))/((r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta+theta0) + r0**2*np.cos(2*theta0))**2 + (r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta+theta0) + r0**2*np.sin(2*theta0))**2)
-        G5 = 1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2)
-        G6 = ((R-epsilon)**2*(np.sin(2*theta)))/(r**2)
-        velocity = V_inf*(G5*(np.cos(alpha)+G1-G3)+G6*(G2-np.sin(alpha)-G4))/(G5**2 + G6**2) - 1j*V_inf*(G5*(G2-np.sin(alpha)-G4)-G6*(np.cos(alpha)+G1-G3))/(G5**2 + G6**2)
-        velocity_expanded = V_inf*((1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2))*(np.cos(alpha)+(Gamma*(r*np.sin(theta)-r0*np.sin(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0))))-(R**2*(2*r**2*np.sin(theta)*np.sin(alpha - theta) + r**2*np.cos(alpha) - 2*r*r0*np.cos(-alpha + theta + theta0) + 2*r0**2*np.sin(theta0)*np.sin(alpha - theta0) + r0**2*np.cos(alpha))/((r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta + theta0) + r0**2*np.sin(2*theta0))**2 + (r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta + theta0) + r0**2*np.cos(2*theta0))**2)))+(((R-epsilon)**2*(np.sin(2*theta)))/(r**2))*((Gamma*(r*np.cos(theta)-r0*np.cos(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0))))-np.sin(alpha)-((R**2*(r**2*np.sin(alpha)-2*r**2*np.sin(theta)*np.cos(alpha-theta)+2*r*r0*np.sin(-alpha+theta+theta0)+r0**2*np.sin(alpha)-2*r0**2*np.sin(theta0)*np.cos(alpha-theta0)))/((r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta+theta0) + r0**2*np.cos(2*theta0))**2 + (r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta+theta0) + r0**2*np.sin(2*theta0))**2))))/((1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2))**2 + (((R-epsilon)**2*(np.sin(2*theta)))/(r**2))**2) - 1j*V_inf*((1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2))*((Gamma*(r*np.cos(theta)-r0*np.cos(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0))))-np.sin(alpha)-((R**2*(r**2*np.sin(alpha)-2*r**2*np.sin(theta)*np.cos(alpha-theta)+2*r*r0*np.sin(-alpha+theta+theta0)+r0**2*np.sin(alpha)-2*r0**2*np.sin(theta0)*np.cos(alpha-theta0)))/((r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta+theta0) + r0**2*np.cos(2*theta0))**2 + (r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta+theta0) + r0**2*np.sin(2*theta0))**2)))-(((R-epsilon)**2*(np.sin(2*theta)))/(r**2))*(np.cos(alpha)+(Gamma*(r*np.sin(theta)-r0*np.sin(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0))))-(R**2*(2*r**2*np.sin(theta)*np.sin(alpha - theta) + r**2*np.cos(alpha) - 2*r*r0*np.cos(-alpha + theta + theta0) + 2*r0**2*np.sin(theta0)*np.sin(alpha - theta0) + r0**2*np.cos(alpha))/((r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta + theta0) + r0**2*np.sin(2*theta0))**2 + (r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta + theta0) + r0**2*np.cos(2*theta0))**2))))/((1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2))**2 + (((R-epsilon)**2*(np.sin(2*theta)))/(r**2))**2)
-        # V_real = V_inf*((1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2))*(np.cos(alpha)+(Gamma*(r*np.sin(theta)-r0*np.sin(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0))))-(R**2*(2*r**2*np.sin(theta)*np.sin(alpha - theta) + r**2*np.cos(alpha) - 2*r*r0*np.cos(-alpha + theta + theta0) + 2*r0**2*np.sin(theta0)*np.sin(alpha - theta0) + r0**2*np.cos(alpha))/((r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta + theta0) + r0**2*np.sin(2*theta0))**2 + (r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta + theta0) + r0**2*np.cos(2*theta0))**2)))+(((R-epsilon)**2*(np.sin(2*theta)))/(r**2))*((Gamma*(r*np.cos(theta)-r0*np.cos(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0))))-np.sin(alpha)-((R**2*(r**2*np.sin(alpha)-2*r**2*np.sin(theta)*np.cos(alpha-theta)+2*r*r0*np.sin(-alpha+theta+theta0)+r0**2*np.sin(alpha)-2*r0**2*np.sin(theta0)*np.cos(alpha-theta0)))/((r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta+theta0) + r0**2*np.cos(2*theta0))**2 + (r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta+theta0) + r0**2*np.sin(2*theta0))**2))))/((1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2))**2 + (((R-epsilon)**2*(np.sin(2*theta)))/(r**2))**2)
-        V_real = (Gamma/(2*np.pi))*((G1*G5+G2*G6)/(G5**2 + G6**2)) + V_inf*((G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
-        # V_imag = -V_inf*((1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2))*((Gamma*(r*np.cos(theta)-r0*np.cos(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0))))-np.sin(alpha)-((R**2*(r**2*np.sin(alpha)-2*r**2*np.sin(theta)*np.cos(alpha-theta)+2*r*r0*np.sin(-alpha+theta+theta0)+r0**2*np.sin(alpha)-2*r0**2*np.sin(theta0)*np.cos(alpha-theta0)))/((r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta+theta0) + r0**2*np.cos(2*theta0))**2 + (r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta+theta0) + r0**2*np.sin(2*theta0))**2)))-(((R-epsilon)**2*(np.sin(2*theta)))/(r**2))*(np.cos(alpha)+(Gamma*(r*np.sin(theta)-r0*np.sin(theta0))/(2*np.pi*V_inf*(r**2 + r0**2 - 2*r*r0*np.cos(theta-theta0))))-(R**2*(2*r**2*np.sin(theta)*np.sin(alpha - theta) + r**2*np.cos(alpha) - 2*r*r0*np.cos(-alpha + theta + theta0) + 2*r0**2*np.sin(theta0)*np.sin(alpha - theta0) + r0**2*np.cos(alpha))/((r**2*np.sin(2*theta) - 2*r*r0*np.sin(theta + theta0) + r0**2*np.sin(2*theta0))**2 + (r**2*np.cos(2*theta) - 2*r*r0*np.cos(theta + theta0) + r0**2*np.cos(2*theta0))**2))))/((1 - ((R-epsilon)**2*(np.cos(2*theta)))/(r**2))**2 + (((R-epsilon)**2*(np.sin(2*theta)))/(r**2))**2)
-        V_imag = (-1*Gamma/(2*np.pi))*((G2*G5-G1*G6)/(G5**2 + G6**2)) + V_inf*((G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
-        # test_velocity = (Gamma/(2*np.pi))*(G1*G5+G2*G6)/(G5**2 + G6**2) + V_inf*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2) + 1j*((Gamma/(2*np.pi))*(G2*G5-G1*G6)/(G5**2 + G6**2) - V_inf*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
         velocity_complex = np.array([V_real, V_imag])
-        # print("real velocity", velocity_complex[0])
-        # print("imag velocity", velocity_complex[1])
-        # velocity_r = velocity_complex[0]*np.cos(theta) + velocity_complex[1]*np.sin(theta)
-        velocity_r = V_inf*(G5*(np.cos(alpha)+G1-G3)+G6*(G2-np.sin(alpha)-G4))/(G5**2 + G6**2)*np.cos(theta) - V_inf*(G5*(G2-np.sin(alpha)-G4)-G6*(np.cos(alpha)+G1-G3))/(G5**2 + G6**2)*np.sin(theta)
-        # velocity_theta = velocity_complex[1]*np.cos(theta) - velocity_complex[0]*np.sin(theta)
-        velocity_theta = -V_inf*(G5*(G2-np.sin(alpha)-G4)-G6*(np.cos(alpha)+G1-G3))/(G5**2 + G6**2)*np.cos(theta) - V_inf*(G5*(np.cos(alpha)+G1-G3)+G6*(G2-np.sin(alpha)-G4))/(G5**2 + G6**2)*np.sin(theta)
-        # print("radial velocity", velocity_r)
-        # print("theta velocity", velocity_theta)
+        print("real velocity", V_real)
+        print("imag velocity", V_imag)
         return velocity_complex
+
+    def polar_velocity(self, theta, cartesian_velocity):
+        """This function converts the cartesian velocity to polar velocity (can go from z, zeta, or chi plane to polar velocity)"""
+        velocity_r = cartesian_velocity[0]*np.cos(theta) + cartesian_velocity[1]*np.sin(theta)
+        print("\nradial velocity", velocity_r)
+        velocity_theta = cartesian_velocity[1]*np.cos(theta) - cartesian_velocity[0]*np.sin(theta)
+        print("theta velocity", velocity_theta)
+        polar_velocity = np.array([velocity_r, velocity_theta])
+        return polar_velocity
     
     def partials(self, point_xy_in_z_plane):
         z = point_xy_in_z_plane[0] + 1j*point_xy_in_z_plane[1]
@@ -355,7 +303,7 @@ class cylinder(potential_flow_object):
     
     def zeta_to_Chi(self, zeta: complex):
         """This function takes in a zeta coordinate and returns the Chi coordinate"""
-        Chi = zeta -self.zeta_center
+        Chi = zeta - self.zeta_center
         return Chi
 
     def Chi_to_zeta(self, Chi: complex):
@@ -561,11 +509,21 @@ if __name__ == "__main__":
     z_0 = cyl.zeta_to_z(complex_zeta_center)
     # print("z_0: ", z_0)
     zeta_test = [zeta_test.real, zeta_test.imag]
+    theta_zeta = np.arctan2(zeta_test[1], zeta_test[0])
     z_test = [z_test.real, z_test.imag]
-    # print("z test point: ", z_test)
-
+    # theta_z = np.arctan2(z_test[1], z_test[0])
+    chi_test = [chi_test.real, chi_test.imag]
+    theta_chi = np.arctan2(chi_test[1], chi_test[0])
     z_velocity_at_z_test = cyl.velocity(z_test)
     Chi_velocity_at_z_test = cyl.Chi_velocity(chi_test)
+    # chi_test = [chi_test[0]+cyl.zeta_center.real, chi_test[1]+cyl.zeta_center.imag]
+    z_polar = cyl.polar_velocity(theta_zeta, z_velocity_at_z_test)
+    Chi_polar = cyl.polar_velocity(theta_chi, Chi_velocity_at_z_test)
+
+    z_polar_mag = np.sqrt(z_polar[0]**2 + z_polar[1]**2)
+    print("z_polar_mag: ", z_polar_mag)
+    Chi_polar_mag = np.sqrt(Chi_polar[0]**2 + Chi_polar[1]**2)
+    print("Chi_polar_mag: ", Chi_polar_mag)
     # alternative_z_velocity_at_z_test = cyl.alternative_velocity(z_test)
-    polar_z_velocity_at_z_test = cyl.polar_velocity(z_test)
+    # polar_z_velocity_at_z_test = cyl.polar_velocity(z_test)
     print("\n")
