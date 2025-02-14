@@ -184,8 +184,8 @@ class cylinder(potential_flow_object):
         theta = np.arctan2(eta, xi)
         velocity = self.freestream_velocity*(np.exp(-1j*self.angle_of_attack) + 1j*self.circulation/(2*np.pi*self.freestream_velocity*(zeta-self.zeta_center)) - np.exp(1j*self.angle_of_attack)*self.cylinder_radius**2/(zeta-self.zeta_center)**2) / (1 - (self.cylinder_radius-self.epsilon)**2/(zeta)**2) # eq 107
         velocity_complex = np.array([velocity.real, -velocity.imag])
-        print("real velocity", velocity_complex[0])
-        print("imag velocity", velocity_complex[1])
+        # print("real velocity", velocity_complex[0])
+        # print("imag velocity", velocity_complex[1])
         # velocity_r = velocity_complex[0]*np.cos(theta) + velocity_complex[1]*np.sin(theta)
         # velocity_theta = velocity_complex[1]*np.cos(theta) - velocity_complex[0]*np.sin(theta)
         # print("radial velocity", velocity_r)
@@ -194,10 +194,8 @@ class cylinder(potential_flow_object):
     
     def Chi_velocity(self, point_xy_in_Chi_plane):
         """Start with a Chi value that is shifted from zeta_center"""
-        Chi_real = point_xy_in_Chi_plane[0]
-        Chi_imag = point_xy_in_Chi_plane[1]
-        xi = Chi_real
-        eta = Chi_imag
+        xi = point_xy_in_Chi_plane[0]
+        eta = point_xy_in_Chi_plane[1]
         r = np.sqrt(xi**2 + eta**2)
         theta = np.arctan2(eta, xi)
         zeta_center = self.zeta_center
@@ -227,8 +225,12 @@ class cylinder(potential_flow_object):
         V_real = (Gamma/(2*np.pi))*((G1*G5+G2*G6)/(G5**2 + G6**2)) + V_inf*((G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
         V_imag = (-1*Gamma/(2*np.pi))*((G2*G5-G1*G6)/(G5**2 + G6**2)) + V_inf*((G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
         velocity_complex = np.array([V_real, V_imag])
-        print("real velocity", V_real)
-        print("imag velocity", V_imag)
+        # print("real velocity", V_real)
+        # print("imag velocity", V_imag)
+        velocity_r = np.cos(theta)*Gamma/(2*np.pi)*(G1*G5+G2*G6)/(G5**2 + G6**2)+np.cos(theta)*V_inf*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2) - np.sin(theta)*Gamma/(2*np.pi)*(G2*G5-G1*G6)/(G5**2 + G6**2) + np.sin(theta)*V_inf*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2)
+        velocity_theta = np.cos(theta)*V_inf*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2) - np.cos(theta)*Gamma/(2*np.pi)*(G2*G5-G1*G6)/(G5**2 + G6**2) - np.sin(theta)*Gamma/(2*np.pi)*(G1*G5+G2*G6)/(G5**2 + G6**2) - np.sin(theta)*V_inf*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2)
+        print("radial velocityChi", velocity_r)
+        print("theta velocityChi", velocity_theta)
         return velocity_complex
 
     def polar_velocity(self, theta, cartesian_velocity):
@@ -291,6 +293,66 @@ class cylinder(potential_flow_object):
         dG4_d_theta = (R^2*(2*(2*sin(2*theta)*r^2 - 2*r_0*sin(theta + theta_0)*r)*(cos(2*theta)*r^2 - 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2) - 2*(2*cos(2*theta)*r^2 - 2*r_0*cos(theta + theta_0)*r)*(sin(2*theta)*r^2 - 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2))*(r^2*sin(alpha) + r_0^2*sin(alpha) - 2*r^2*sin(theta)*cos(alpha - theta) - 2*r_0^2*sin(theta_0)*cos(alpha - theta_0) + 2*r*r_0*sin(theta - alpha + theta_0)))/((cos(2*theta)*r^2 - 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 - 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2)^2 - (R^2*(2*r^2*cos(theta)*cos(alpha - theta) + 2*r^2*sin(alpha - theta)*sin(theta) - 2*r*r_0*cos(theta - alpha + theta_0)))/((cos(2*theta)*r^2 - 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 - 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2)
         dG5_d_theta = (2*sin(2*theta)*(R - epsilon)^2)/r^2
         dG6_d_theta = (2*cos(2*theta)*(R - epsilon)^2)/r^2
+
+    def Chi_partials(self, point_xy_in_Chi_plane):
+        """Start with a Chi value that is shifted from zeta_center"""
+        Chi_real = point_xy_in_Chi_plane[0]
+        Chi_imag = point_xy_in_Chi_plane[1]
+        xi = Chi_real
+        eta = Chi_imag
+        r = np.sqrt(xi**2 + eta**2)
+        theta = np.arctan2(eta, xi)
+        zeta_center = self.zeta_center
+        xio = zeta_center.real
+        etao = zeta_center.imag
+        r0 = np.sqrt(xio**2 + etao**2)
+        theta0 = np.arctan2(etao, xio)
+        V_inf = self.freestream_velocity
+        Gamma = self.circulation
+        R = self.cylinder_radius
+        alpha = self.angle_of_attack
+        epsilon = self.epsilon
+        omega_chi_unsplit = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(xi+1j*eta)) - np.exp(1j*alpha)*R**2/(xi+1j*eta)**2) / (1 - (R-epsilon)**2/(xi+xio+1j*(eta+etao))**2)
+        G1 = np.sin(theta)/r # this is the same as the above line
+        # G2 = xi/(xi**2 + eta**2)
+        G2 = np.cos(theta)/r # this is the same as the above line
+        # G3 = R**2*(np.cos(alpha)*(xi**2-eta**2)+2*xi*eta*np.sin(alpha))/((xi**2-eta**2)**2+(4*xi**2*eta**2))
+        G3 = R**2*(r**2*np.cos(alpha)*np.cos(2*theta)+r**2*np.sin(alpha)*np.sin(2*theta))/((r**2*np.cos(2*theta))**2+0.5*r**4*(1-np.cos(4*theta))) # this is the same as the above line
+        # G4 = R**2*(np.sin(alpha)*(xi**2-eta**2)-2*xi*eta*np.cos(alpha))/((xi**2-eta**2)**2+(4*xi**2*eta**2))
+        G4 = R**2*(r**2*np.sin(alpha)*np.cos(2*theta)-r**2*np.cos(alpha)*np.sin(2*theta))/((r**2*np.cos(2*theta))**2+0.5*r**4*(1-np.cos(4*theta))) # this is the same as the above line
+        # G5 = 1 - ((R-epsilon)**2*((xi+xio)**2 - (eta+etao)**2))/(((xi+xio)**2 - (eta+etao)**2)**2 + (2*(xi+xio)*(eta+etao))**2)
+        G5 = 1 - ((R-epsilon)**2*(r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2) # this is the same as the above line
+        # G6 = ((R-epsilon)**2*(2*(xi+xio)*(eta+etao)))/(((xi+xio)**2 - (eta+etao)**2)**2 + (2*(xi+xio)*(eta+etao))**2)
+        G6 = ((R-epsilon)**2*(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2) # this is the same as the above line
+        # omega r partials with respect to G1, G2, G3, G4, G5, G6
+        dr_d_G1 = (G5*Gamma*cos(theta))/(2*PIE*(G5^2 + G6^2)) + (G6*Gamma*sin(theta))/(2*PIE*(G5^2 + G6^2))
+        dr_d_G2 = (G6*Gamma*cos(theta))/(2*PIE*(G5^2 + G6^2)) - (G5*Gamma*sin(theta))/(2*PIE*(G5^2 + G6^2))
+        dr_d_G3 = - (G5*V_inf*cos(theta))/(G5^2 + G6^2) - (G6*V_inf*sin(theta))/(G5^2 + G6^2)
+        dr_d_G4 = (G5*V_inf*sin(theta))/(G5^2 + G6^2) - (G6*V_inf*cos(theta))/(G5^2 + G6^2)
+        dr_d_G5 = (V_inf*sin(theta)*(G4 + sin(alpha)))/(G5^2 + G6^2) - (V_inf*cos(theta)*(G3 - cos(alpha)))/(G5^2 + G6^2) + (2*G5*V_inf*cos(theta)*(G6*sin(alpha) - G5*cos(alpha) + G3*G5 + G4*G6))/(G5^2 + G6^2)^2 - (2*G5*V_inf*sin(theta)*(G6*cos(alpha) + G5*sin(alpha) - G3*G6 + G4*G5))/(G5^2 + G6^2)^2 + (G1*Gamma*cos(theta))/(2*PIE*(G5^2 + G6^2)) - (G2*Gamma*sin(theta))/(2*PIE*(G5^2 + G6^2)) - (G5*Gamma*cos(theta)*(G1*G5 + G2*G6))/(PIE*(G5^2 + G6^2)^2) - (G5*Gamma*sin(theta)*(G1*G6 - G2*G5))/(PIE*(G5^2 + G6^2)^2)
+        dr_d_G6 = (2*G6*V_inf*cos(theta)*(G6*sin(alpha) - G5*cos(alpha) + G3*G5 + G4*G6))/(G5^2 + G6^2)^2 - (V_inf*sin(theta)*(G3 - cos(alpha)))/(G5^2 + G6^2) - (V_inf*cos(theta)*(G4 + sin(alpha)))/(G5^2 + G6^2) - (2*G6*V_inf*sin(theta)*(G6*cos(alpha) + G5*sin(alpha) - G3*G6 + G4*G5))/(G5^2 + G6^2)^2 + (G2*Gamma*cos(theta))/(2*PIE*(G5^2 + G6^2)) + (G1*Gamma*sin(theta))/(2*PIE*(G5^2 + G6^2)) - (G6*Gamma*cos(theta)*(G1*G5 + G2*G6))/(PIE*(G5^2 + G6^2)^2) - (G6*Gamma*sin(theta)*(G1*G6 - G2*G5))/(PIE*(G5^2 + G6^2)^2)
+        # omega theta partials with respect to G1, G2, G3, G4, G5, G6
+        dt_d_G1 = (G6*Gamma*cos(theta))/(2*PIE*(G5^2 + G6^2)) - (G5*Gamma*sin(theta))/(2*PIE*(G5^2 + G6^2))
+        dt_d_G2 = - (G5*Gamma*cos(theta))/(2*PIE*(G5^2 + G6^2)) - (G6*Gamma*sin(theta))/(2*PIE*(G5^2 + G6^2))
+        dt_d_G3 = (G5*V_inf*sin(theta))/(G5^2 + G6^2) - (G6*V_inf*cos(theta))/(G5^2 + G6^2)
+        dt_d_G4 = (G5*V_inf*cos(theta))/(G5^2 + G6^2) + (G6*V_inf*sin(theta))/(G5^2 + G6^2)
+        dt_d_G5 = (V_inf*cos(theta)*(G4 + sin(alpha)))/(G5^2 + G6^2) + (V_inf*sin(theta)*(G3 - cos(alpha)))/(G5^2 + G6^2) - (2*G5*V_inf*cos(theta)*(G6*cos(alpha) + G5*sin(alpha) - G3*G6 + G4*G5))/(G5^2 + G6^2)^2 - (2*G5*V_inf*sin(theta)*(G6*sin(alpha) - G5*cos(alpha) + G3*G5 + G4*G6))/(G5^2 + G6^2)^2 - (G2*Gamma*cos(theta))/(2*PIE*(G5^2 + G6^2)) - (G1*Gamma*sin(theta))/(2*PIE*(G5^2 + G6^2)) - (G5*Gamma*cos(theta)*(G1*G6 - G2*G5))/(PIE*(G5^2 + G6^2)^2) + (G5*Gamma*sin(theta)*(G1*G5 + G2*G6))/(PIE*(G5^2 + G6^2)^2)
+        dt_d_G6 = (V_inf*sin(theta)*(G4 + sin(alpha)))/(G5^2 + G6^2) - (V_inf*cos(theta)*(G3 - cos(alpha)))/(G5^2 + G6^2) - (2*G6*V_inf*cos(theta)*(G6*cos(alpha) + G5*sin(alpha) - G3*G6 + G4*G5))/(G5^2 + G6^2)^2 - (2*G6*V_inf*sin(theta)*(G6*sin(alpha) - G5*cos(alpha) + G3*G5 + G4*G6))/(G5^2 + G6^2)^2 + (G1*Gamma*cos(theta))/(2*PIE*(G5^2 + G6^2)) - (G2*Gamma*sin(theta))/(2*PIE*(G5^2 + G6^2)) - (G6*Gamma*cos(theta)*(G1*G6 - G2*G5))/(PIE*(G5^2 + G6^2)^2) + (G6*Gamma*sin(theta)*(G1*G5 + G2*G6))/(PIE*(G5^2 + G6^2)^2)
+        # G partials with respect to r
+        dG1_d_r = -sin(theta)/r^2
+        dG2_d_r = -cos(theta)/r^2
+        dG3_d_r = (R^2*(r^2*cos(2*theta)*cos(alpha) + r^2*sin(2*theta)*sin(alpha))*(2*r^3*(cos(4*theta) - 1) - 4*r^3*cos(2*theta)^2))/((r^4*(cos(4*theta) - 1))/2 - r^4*cos(2*theta)^2)^2 - (R^2*(2*r*cos(2*theta)*cos(alpha) + 2*r*sin(2*theta)*sin(alpha)))/((r^4*(cos(4*theta) - 1))/2 - r^4*cos(2*theta)^2)
+        dG4_d_r = (R^2*(r^2*cos(2*theta)*sin(alpha) - r^2*sin(2*theta)*cos(alpha))*(2*r^3*(cos(4*theta) - 1) - 4*r^3*cos(2*theta)^2))/((r^4*(cos(4*theta) - 1))/2 - r^4*cos(2*theta)^2)^2 - (R^2*(2*r*cos(2*theta)*sin(alpha) - 2*r*sin(2*theta)*cos(alpha)))/((r^4*(cos(4*theta) - 1))/2 - r^4*cos(2*theta)^2)
+        dG5_d_r = ((R - epsilon)^2*(2*(2*r*cos(2*theta) + 2*r_0*cos(theta + theta_0))*(cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2) + 2*(2*r*sin(2*theta) + 2*r_0*sin(theta + theta_0))*(sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2))*(cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2))/((cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2)^2 - ((R - epsilon)^2*(2*r*cos(2*theta) + 2*r_0*cos(theta + theta_0)))/((cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2)
+        dG6_d_r = ((2*r*sin(2*theta) + 2*r_0*sin(theta + theta_0))*(R - epsilon)^2)/((cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2) - ((R - epsilon)^2*(2*(2*r*cos(2*theta) + 2*r_0*cos(theta + theta_0))*(cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2) + 2*(2*r*sin(2*theta) + 2*r_0*sin(theta + theta_0))*(sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2))*(sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2))/((cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2)^2
+        # G partials with respect to theta
+        dG1_d_theta = cos(theta)/r
+        dG2_d_theta = -sin(theta)/r
+        dG3_d_theta = -(R^2*(2*r^2*cos(2*theta)*sin(alpha) - 2*r^2*sin(2*theta)*cos(alpha)))/((r^4*(cos(4*theta) - 1))/2 - r^4*cos(2*theta)^2) - (R^2*(2*r^4*sin(4*theta) - 4*r^4*cos(2*theta)*sin(2*theta))*(r^2*cos(2*theta)*cos(alpha) + r^2*sin(2*theta)*sin(alpha)))/((r^4*(cos(4*theta) - 1))/2 - r^4*cos(2*theta)^2)^2
+        dG4_d_theta = (R^2*(2*r^2*cos(2*theta)*cos(alpha) + 2*r^2*sin(2*theta)*sin(alpha)))/((r^4*(cos(4*theta) - 1))/2 - r^4*cos(2*theta)^2) - (R^2*(2*r^4*sin(4*theta) - 4*r^4*cos(2*theta)*sin(2*theta))*(r^2*cos(2*theta)*sin(alpha) - r^2*sin(2*theta)*cos(alpha)))/((r^4*(cos(4*theta) - 1))/2 - r^4*cos(2*theta)^2)^2
+        dG5_d_theta = ((R - epsilon)^2*(2*sin(2*theta)*r^2 + 2*r_0*sin(theta + theta_0)*r))/((cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2) - ((2*(2*sin(2*theta)*r^2 + 2*r_0*sin(theta + theta_0)*r)*(cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2) - 2*(2*cos(2*theta)*r^2 + 2*r_0*cos(theta + theta_0)*r)*(sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2))*(R - epsilon)^2*(cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2))/((cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2)^2
+        dG6_d_theta = ((R - epsilon)^2*(2*cos(2*theta)*r^2 + 2*r_0*cos(theta + theta_0)*r))/((cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2) + ((2*(2*sin(2*theta)*r^2 + 2*r_0*sin(theta + theta_0)*r)*(cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2) - 2*(2*cos(2*theta)*r^2 + 2*r_0*cos(theta + theta_0)*r)*(sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2))*(R - epsilon)^2*(sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2))/((cos(2*theta)*r^2 + 2*cos(theta + theta_0)*r*r_0 + cos(2*theta_0)*r_0^2)^2 + (sin(2*theta)*r^2 + 2*sin(theta + theta_0)*r*r_0 + sin(2*theta_0)*r_0^2)^2)^2
+
 
     def zeta_to_z(self, zeta: complex):
         """This function takes in a zeta coordinate and returns the z coordinate"""
