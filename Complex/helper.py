@@ -210,6 +210,25 @@ def string_to_latex(expression: str):
     latex_expression = sympy.latex(expression)
     return latex_expression
 
+def list_to_range(three_element_list: list):
+    step_size = three_element_list[2]
+    values = np.arange(three_element_list[0], three_element_list[1] + step_size, step_size)
+    return values
+
+def xy_to_r_theta(x: float, y: float):
+    r = np.sqrt(x**2 + y**2)
+    theta = np.arctan2(y, x)
+    return r, theta
+
+def r_theta_to_xy(r: float, theta: float):
+    x = r * np.cos(theta)
+    y = r * np.sin(theta)
+    return x, y
+
+def central_difference(f_plus: float, f_minus: float, step_size: float):
+    derivative = (f_plus - f_minus)/(2*step_size)
+    return derivative
+
 if __name__ == "__main__":
     # Define symbols
     V_inf, alpha, Gamma, zeta, zeta0, eta, etao, xi, xio, R, eps, Pie, r, r0, theta, theta0 = symbols(
