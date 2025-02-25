@@ -730,9 +730,9 @@ class cylinder(potential_flow_object):
         r0, theta0 = hlp.xy_to_r_theta(self.zeta_center.real, self.zeta_center.imag)
         r, theta = hlp.xy_to_r_theta(chi_test[0], chi_test[1])
         # d_omega_r_dr, d_omega_r_dtheta, d_omega_theta_dr, d_omega_theta_dtheta = self.all_partials(r,theta,self.angle_of_attack, self.epsilon, self.cylinder_radius, r0, theta0, Gamma)
-        if 
-        for i in range(len(xi_eta_values)):
-            plt.plot(xi_eta_values[i][0], xi_eta_values[i][1], color='red')
+        if self.show_fig:
+            for i in range(len(xi_eta_values)):
+                plt.plot(xi_eta_values[i][0], xi_eta_values[i][1], color='red')
 
         return Appellian_values, xi_eta_values
 
