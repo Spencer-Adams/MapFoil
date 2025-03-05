@@ -23,9 +23,9 @@ class potential_flow_object:
         with open(self.json_file, 'r') as json_handle:
             input = json.load(json_handle)
             self.plot_x_lower_lim = input["plot"]["x_lower_limit"]/self.original_cylinder_radius#self.cylinder_radius # this is the lower limit of the plot in x direction.
-            print("x lower limit", self.plot_x_lower_lim)
+            # print("x lower limit", self.plot_x_lower_lim)
             self.plot_x_upper_lim = input["plot"]["x_upper_limit"]/self.original_cylinder_radius#self.cylinder_radius # this is the lower limit of the plot in x direction.
-            print("x upper limit", self.plot_x_upper_lim)
+            # print("x upper limit", self.plot_x_upper_lim)
             self.plot_x_start = input["plot"]["x_start"]/self.original_cylinder_radius#self.cylinder_radius # this is the lower limit of the plot in x direction.
             self.plot_delta_s = input["plot"]["delta_s"]
             self.plot_n_lines = input["plot"]["n_lines"]
@@ -35,10 +35,10 @@ class potential_flow_object:
                 self.x_trailing_edge = (self.zeta_center.real + self.cylinder_radius)/self.cylinder_radius
                 zeta_leading_edge = (self.x_leading_edge + 1j*self.zeta_center.imag)/self.cylinder_radius
                 zeta_trailing_edge = (self.x_trailing_edge + 1j*self.zeta_center.imag)/self.cylinder_radius
-                self.z_leading_edge = self.zeta_to_z(zeta_leading_edge)
-                self.z_trailing_edge = self.zeta_to_z(zeta_trailing_edge)
-                print("zeta leading edge", zeta_leading_edge)
-                print("zeta trailing edge", zeta_trailing_edge)
+                self.z_leading_edge = self.zeta_to_z(zeta_leading_edge, self.epsilon)
+                self.z_trailing_edge = self.zeta_to_z(zeta_trailing_edge, self.epsilon)
+                # print("zeta leading edge", zeta_leading_edge)
+                # print("zeta trailing edge", zeta_trailing_edge)
             else:
                 # self.x_leading_edge, self.x_trailing_edge = self.calc_zeta_real_intercepts()
                 self.x_leading_edge = self.zeta_center.real - self.cylinder_radius
@@ -48,15 +48,16 @@ class potential_flow_object:
                 self.zeta_leading_intercept, self.zeta_trailing_intercept = self.calc_zeta_real_intercepts_J_airfoil()
                 self.z_leading_edge = self.zeta_to_z(self.zeta_leading_intercept)
                 self.z_trailing_edge = self.zeta_to_z(self.zeta_trailing_intercept)
-                print("zeta leading edge", zeta_leading_edge)
-                print("zeta trailing edge", zeta_trailing_edge)
-                print("zeta leading intercept", self.zeta_leading_intercept)
-                print("zeta trailing intercept", self.zeta_trailing_intercept)
+                # print("zeta leading edge", zeta_leading_edge)
+                # print("zeta trailing edge", zeta_trailing_edge)
+                # print("zeta leading intercept", self.zeta_leading_intercept)
+                # print("zeta trailing intercept", self.zeta_trailing_intercept)
 
-            print("\n")
-            print("z leading edge", self.z_leading_edge)
-            print("z trailing edge", self.z_trailing_edge)
-            print("\n")
+            # print("\n")
+            # print("z leading edge", self.z_leading_edge)
+            # print("z trailing edge", self.z_trailing_edge)
+            # print("\n")
+
             # shift it more according to the conformal mapping 
             # now read in potential flow elements as well. 
 
@@ -136,10 +137,10 @@ class potential_flow_object:
         x_lower = self.geometry(x_coord)[1][0]
         y_lower = self.geometry(x_coord)[1][1]
         # calculate Vx and Vy for the upper and lower surfaces using the velocity function and the surface tangent function
-        Velocity_upper = self.velocity([x_upper, y_upper])
+        Velocity_upper = self.velocity([x_upper, y_upper], self.circulation)
         upper_tangent = self.surface_tangent(x_coord)[0]
         upper_tangential_velocity = np.dot(Velocity_upper, upper_tangent)
-        Velocity_lower = self.velocity([x_lower, y_lower])
+        Velocity_lower = self.velocity([x_lower, y_lower], self.circulation)
         lower_tangent = self.surface_tangent(x_coord)[1]
         lower_tangential_velocity = np.dot(Velocity_lower, lower_tangent)
         return upper_tangential_velocity, lower_tangential_velocity
@@ -228,10 +229,10 @@ class potential_flow_object:
     
     def unit_velocity(self, point_xy: np.array): # A4 on project
         """This function calculates the unit velocity at a given point in the flow field in cartesian coordinates."""
-        if self.velocity(point_xy)[0] == 0.0 and self.velocity(point_xy)[1] == 0.0:
+        if self.velocity(point_xy, self.circulation)[0] == 0.0 and self.velocity(point_xy, self.circulation)[1] == 0.0:
             velocity = np.array([0.0, 0.0])
         else:
-            velocity = hlp.unit_vector(self.velocity(point_xy))
+            velocity = hlp.unit_vector(self.velocity(point_xy, self.circulation))
         return velocity
     
     def stagnation(self):
@@ -303,11 +304,11 @@ class potential_flow_object:
         x_for_stag_aft = self.aft_stag[0]
         # print("chordwise x/c value for the aft stagnation", x_for_stag_aft)
         print("AFT STAGNATION",self.aft_stag)
-        print("Velocity at Forward Stag", self.velocity(self.forward_stag))
-        pressure_forward = 1-(hlp.vector_magnitude(self.velocity(self.forward_stag))/self.freestream_velocity)**2
+        print("Velocity at Forward Stag", self.velocity(self.forward_stag, self.circulation))
+        pressure_forward = 1-(hlp.vector_magnitude(self.velocity(self.forward_stag, self.circulation))/self.freestream_velocity)**2
         print("Pressure at Forward Stag", pressure_forward)
-        print("Velocity at Aft Stag", self.velocity(self.aft_stag))
-        pressure_aft = 1-(hlp.vector_magnitude(self.velocity(self.aft_stag))/self.freestream_velocity)**2
+        print("Velocity at Aft Stag", self.velocity(self.aft_stag, self.circulation))
+        pressure_aft = 1-(hlp.vector_magnitude(self.velocity(self.aft_stag, self.circulation))/self.freestream_velocity)**2
         print("Pressure at Aft Stag", pressure_aft, "\n")
         return self.forward_stag, self.aft_stag
     
@@ -318,11 +319,11 @@ class potential_flow_object:
         plt.plot(self.upper_coords[:,0], self.upper_coords[:,1], color = "black", label = "J-Cyl") # upper plot
         plt.plot(self.lower_coords[:,0], self.lower_coords[:,1] , color = "black") # lower plot
         plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
-        print("x lower limit", self.plot_x_lower_lim)
-        print("x upper limit", self.plot_x_upper_lim)
+        # print("x lower limit", self.plot_x_lower_lim)
+        # print("x upper limit", self.plot_x_upper_lim)
         plt.ylim(self.plot_x_lower_lim, self.plot_x_upper_lim)
-        print("y lower limit", self.plot_x_lower_lim)
-        print("y upper limit", self.plot_x_upper_lim)
+        # print("y lower limit", self.plot_x_lower_lim)
+        # print("y upper limit", self.plot_x_upper_lim)
         # # use plot_surface_tangents and plot_surface_normals to plot the surface tangents on the geometry (skip 5 out of 6 geom points for less dense tangent vector plot, but make sure to include the leading and trailing edges)
         # for i in range(len(self.upper_coords)):
         #     if i % 6 == 0 or i == 0 or i == len(self.upper_coords) - 1: #

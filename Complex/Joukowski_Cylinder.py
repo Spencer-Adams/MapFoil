@@ -1,10 +1,13 @@
 import json
 import numpy as np # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
-import scipy.integrate as spi # this is for numerical integration
+import scipy.integrate as sp_int # type: ignore
+from scipy.integrate import dblquad # type: ignore
 # import bisection from scipy.optimize
 import helper as hlp
 from complex_potential_flow_class import potential_flow_object
+# import tqdm for progress bar
+from tqdm import tqdm
 
 
 class cylinder(potential_flow_object):
@@ -18,7 +21,18 @@ class cylinder(potential_flow_object):
         """This function reads the json file and stores the cylinder specific data in a dictionary"""
         with open(self.cyl_json_file, 'r') as json_handle:
             input = json.load(json_handle)
-            self.is_test_appellian = input["operating"]["is_test_appellian"]
+            print("\n")
+            self.is_D = input["geometry"]["is_trailing_edge_sharpness_D"]
+            self.D = input["geometry"]["trailing_edge_sharpness_D"]
+            self.is_appellian = input["appellian"]["compute_appellian"]
+            self.is_analytic_accel = input["appellian"]["is_analytic_accel"]
+            self.is_chi = input["appellian"]["is_chi"]
+            self.is_z = input["appellian"]["is_z"]
+            self.is_pressure_gradient = input["appellian"]["is_pressure_gradient"]
+            self.step_size = input["appellian"]["step_size"]
+            self.polynomial_order = input["appellian"]["polynomial_order"]
+            self.is_plot_appellian = input["appellian"]["is_plot_appellian"]
+            self.is_plot_D_sweep = input["plot"]["is_plot_D_sweep"]
             self.save_fig = input["plot"]["save_fig"]
             self.show_fig = input["plot"]["show_fig"]
             self.plot_text = input["plot"]["plot_text"]
@@ -35,21 +49,24 @@ class cylinder(potential_flow_object):
             self.angle_of_attack = np.radians(angle_of_attack)
             self.freestream_velocity = input["operating"]["freestream_velocity"]
             self.design_CL = input["geometry"]["design_CL"]
-            print("\ndesign CL", self.design_CL)
             self.design_thickness = input["geometry"]["design_thickness"]
-            print("design thickness", self.design_thickness)
             self.output_points = input["geometry"]["output_points"]
             if self.output_points % 2 == 0:
                 self.even_num_points = True
             else:
                 self.even_num_points = False
             self.n_geom_points = self.output_points
-
             if self.type == "cylinder":
                 self.circulation = input["operating"]["vortex_strength"]
                 zeta_center = input["geometry"]["zeta_0"] # this is a list of two elements, real and imaginary parts of zeta_0. We need to convert it to a complex number
                 self.zeta_center = (zeta_center[0] + 1j*zeta_center[1])/self.cylinder_radius
-                self.epsilon = input["geometry"]["epsilon"]
+                if self.is_D:
+                    self.epsilon = self.calc_epsilon_from_D(self.D)
+                    print("epsilon from D = " + str(self.D) + " and zeta0 = " + str(self.zeta_center) + " is " + str(self.epsilon))
+                else:
+                    self.epsilon = input["geometry"]["epsilon"]
+                    D = self.calc_D_from_epsilon()
+                    print("D from epsilon = " + str(self.epsilon) + " and zeta0 = " + str(self.zeta_center) + " is " + str(D))
             else:
                 self.zeta_center = self.calc_J_airfoil_zeta_center() # uses design CL and thickness to calculate zeta center
                 print("J airfoil zeta center", self.zeta_center)
@@ -58,6 +75,18 @@ class cylinder(potential_flow_object):
                 self.circulation = self.calc_circulation_J_airfoil() # uses the Kutta condition to calculate circulation
                 print("J airfoil circulation", self.circulation)
                 # calculate gamma so that it satisfies the Kutta condition for the airfoil
+
+    def calc_epsilon_from_D(self, D: float):
+        """This function calculates epsilon from D"""
+        epsilon_o = self.calc_J_airfoil_epsilon()
+        epsilon = D*(1-epsilon_o)+epsilon_o
+        return epsilon
+    
+    def calc_D_from_epsilon(self):
+        """This function calculates D from epsilon"""
+        epsilon_o = self.calc_J_airfoil_epsilon()
+        D = (self.epsilon-epsilon_o)/(1-epsilon_o)
+        return D
     
     def geometry_zeta(self, x_coord: float): # A1 on project
         """
@@ -104,7 +133,7 @@ class cylinder(potential_flow_object):
         plt.plot(self.lower_zeta_coords[:,0], self.lower_zeta_coords[:,1], linestyle=linetype, color=color)
         # plt.plot(self.camber_zeta_coords[:,0], self.camber_zeta_coords[:,1], label="Camber Line", linestyle=linetype, color=color)
         # plot the zeta center with a hallow circle marker
-        size = 40
+        size = 5
         plt.scatter(self.zeta_center.real, self.zeta_center.imag, color=color, marker='o', s = size, facecolors='none', label="$\\zeta_0$")
 
     def geometry(self, x_from_zeta: float): # A1 on project
@@ -113,9 +142,9 @@ class cylinder(potential_flow_object):
         zeta_lower = self.geometry_zeta(x_from_zeta)[1][0] + 1j*self.geometry_zeta(x_from_zeta)[1][1]
         zeta_camber = self.geometry_zeta(x_from_zeta)[2][0] + 1j*self.geometry_zeta(x_from_zeta)[2][1]
 
-        z_upper = self.zeta_to_z(zeta_upper)
-        z_lower = self.zeta_to_z(zeta_lower)
-        z_camber = self.zeta_to_z(zeta_camber)
+        z_upper = self.zeta_to_z(zeta_upper, self.epsilon)
+        z_lower = self.zeta_to_z(zeta_lower, self.epsilon)
+        z_camber = self.zeta_to_z(zeta_camber, self.epsilon)
         return [z_upper.real, z_upper.imag], [z_lower.real, z_lower.imag], [z_camber.real, z_camber.imag]  
 
     def get_full_geometry(self):
@@ -127,7 +156,7 @@ class cylinder(potential_flow_object):
         elif self.type == "airfoil" and self.output_points > 3:
             num_points = self.output_points//2 
         else:
-            num_points = 500
+            num_points = self.output_points//2 
         # num_points = 50000
         upper = np.zeros((num_points, 2))  # Ensure upper has the correct size
         lower = np.zeros((num_points, 2))
@@ -142,419 +171,309 @@ class cylinder(potential_flow_object):
         self.upper_coords = upper
         self.lower_coords = lower
         self.camber_coords = camber
+        # export upper coords and lower coords to a text file
+        if self.is_plot_D_sweep:
+            # concatenate the upper and lower coordinates
+            combined_upper_lower = np.concatenate((upper, lower), axis=0)
+            np.savetxt("combined_upper_lower_coords_at_D_is_"+str(self.D)+"_and_zeta0_is_" + str(self.zeta_center) + ".txt", combined_upper_lower)
+            print("combined upper and lower coords saved to combined_upper_lower_coords_at_D_is_"+str(self.D)+"_and_zeta0_is_" + str(self.zeta_center) + ".txt")
         return self.upper_coords, self.lower_coords, self.camber_coords
+    
+    def loop_geometry_for_D_sweep(self):
+        """loops the get_full_geometry function for a range of D values"""
     
     def get_and_plot_foci(self):
         """This function calculates and plots the foci of the ellipse using epsilon"""
         self.zeta_trailing_edge_focus = 1*(self.cylinder_radius- self.epsilon)/self.cylinder_radius
         self.zeta_leading_edge_focus = -1*(self.cylinder_radius - self.epsilon)/self.cylinder_radius
-        self.z_trailing_edge_focus = self.zeta_to_z(self.zeta_trailing_edge_focus)#2*(self.cylinder_radius - self.epsilon)
-        self.z_leading_edge_focus = self.zeta_to_z(self.zeta_leading_edge_focus)#-2*(self.cylinder_radius - self.epsilon)
-        print("Real component of z_leading_edge singularity", self.z_leading_edge_focus)
-        print("Real component of z_trailing_edge singularity", self.z_trailing_edge_focus)
+        self.z_trailing_edge_focus = self.zeta_to_z(self.zeta_trailing_edge_focus, self.epsilon)#2*(self.cylinder_radius - self.epsilon)
+        self.z_leading_edge_focus = self.zeta_to_z(self.zeta_leading_edge_focus, self.epsilon)#-2*(self.cylinder_radius - self.epsilon)
+        # print("Real component of z_leading_edge singularity", self.z_leading_edge_focus)
+        # print("Real component of z_trailing_edge singularity", self.z_trailing_edge_focus)
         # list_of_all_possible_markers = ['o', 's', 'D', 'v', '^', '<', '>', 'p', 'P', '*', 'X', 'd', 'H', 'h', '+', '|', '_', '1', '2', '3', '4', '8']
         # D is a diamond, s is a square, o is a circle, v is a triangle pointing down, ^ is a triangle pointing up
         # reduce size of markers 
-        size = 30
-        size_tri = 40
+        size = 5
+        size_tri = 10
         plt.scatter(self.zeta_trailing_edge_focus, 0.0, color='black', marker='^', s = size_tri, label="sing")
         plt.scatter(self.zeta_leading_edge_focus, 0.0, color='black', marker='^', s = size_tri)
         plt.scatter(self.z_trailing_edge_focus, 0.0, color='black', marker='s', s = size, label = "J-np.sing")
         plt.scatter(self.z_leading_edge_focus, 0.0, color='black', marker='s', s = size)
+        return self.zeta_trailing_edge_focus, self.zeta_leading_edge_focus, self.z_trailing_edge_focus, self.z_leading_edge_focus
 
-    def velocity_zeta(self, point_xy, Gamma): # A4 on project
-        """
-        Calculates the velocity at a given point in the flow field in cartesian coordinates using cylindrical velocity equations.
-        Parameters:
-        - point_xy (list): An xy coordinate.
-        Returns:
-        - velocity (list): The velocity at the given point.
-        """
-        z = point_xy[0] + 1j*point_xy[1]
-        w_z = self.freestream_velocity*((np.exp(-1j*self.angle_of_attack)) + 1j*Gamma/(2*np.pi*self.freestream_velocity*(z-self.zeta_center)) + -1*(np.exp(1j*self.angle_of_attack))*self.cylinder_radius**2/(z-self.zeta_center)**2)  
-        velocity_complex = np.array([w_z.real, -w_z.imag])     
-        return velocity_complex
-    
-    def velocity(self, point_xy_in_z_plane, Gamma):
+    def velocity(self, point_xi_eta_in_z_plane, Gamma):
         """This function calculates the velocity at a given point in the flow field in the z plane"""
-        z = point_xy_in_z_plane[0] + 1j*point_xy_in_z_plane[1]
-        zeta = self.z_to_zeta(z)
-        xi, eta = zeta.real, zeta.imag
-        velocity = self.freestream_velocity*(np.exp(-1j*self.angle_of_attack) + 1j*Gamma/(2*np.pi*self.freestream_velocity*(zeta-self.zeta_center)) - np.exp(1j*self.angle_of_attack)*self.cylinder_radius**2/(zeta-self.zeta_center)**2) / (1 - (self.cylinder_radius-self.epsilon)**2/(zeta)**2) # eq 107
+        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
+        zeta = self.z_to_zeta(z, self.epsilon)
+        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        velocity = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2) / (1 - (R-epsilon)**2/(zeta)**2) # eq 107
         velocity_complex = np.array([velocity.real, -velocity.imag])
         return velocity_complex
-
-    def split_velocity_z(self, point_xy_in_z_plane, Gamma):
-        """This function calculates the velocity at a given point in the flow field in the z plane"""
-        z = point_xy_in_z_plane[0] + 1j*point_xy_in_z_plane[1]
-        zeta = self.z_to_zeta(z)
-        xi, eta = zeta.real, zeta.imag
-        G1, G2, G3, G4, G5, G6 = self.calc_z_G_values(xi, eta, self.angle_of_attack, self.epsilon, self.cylinder_radius, self.zeta_center.real, self.zeta_center.imag)
-        omega_real = (Gamma/(2*np.pi))*((G1*G5+G2*G6)/(G5**2 + G6**2)) + self.freestream_velocity*((G5*np.cos(self.angle_of_attack)-G6*np.sin(self.angle_of_attack)-G3*G5-G4*G6)/(G5**2 + G6**2))
-        omega_imag = -(Gamma/(2*np.pi))*((G2*G5-G1*G6)/(G5**2 + G6**2)) + self.freestream_velocity*((G6*np.cos(self.angle_of_attack)+G5*np.sin(self.angle_of_attack)+G4*G5-G3*G6)/(G5**2 + G6**2))
-        return omega_real, omega_imag
-
-    def velocity_chi(self, point_xy_in_Chi_plane, Gamma):
-        """Start with a Chi value that is shifted from zeta_center"""
-        xi, eta = point_xy_in_Chi_plane[0], point_xy_in_Chi_plane[1]
-        r, theta = hlp.xy_to_r_theta(xi, eta)
-        zeta_center = self.zeta_center
-        xio, etao = zeta_center.real, zeta_center.imag
-        r0, theta0 = hlp.xy_to_r_theta(xio, etao)
-        V_inf, R, alpha, epsilon = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.epsilon
-        G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
-        V_real = (Gamma/(2*np.pi))*((G1*G5+G2*G6)/(G5**2 + G6**2)) + V_inf*((G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
-        V_imag = (-1*Gamma/(2*np.pi))*((G2*G5-G1*G6)/(G5**2 + G6**2)) + V_inf*((G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
-        velocity_complex = np.array([V_real, V_imag])
-        return velocity_complex
     
-    def chi_acceleration(self, point_xy_in_Chi_plane, Gamma):
-        """This function calculates the acceleration at a given point in the flow field in the Chi plane"""
-        chi = point_xy_in_Chi_plane[0] + 1j*point_xy_in_Chi_plane[1]
-        xi, eta = point_xy_in_Chi_plane[0], point_xy_in_Chi_plane[1]
-        r, theta = hlp.xy_to_r_theta(xi, eta)
-        xio, etao = self.zeta_center.real, self.zeta_center.imag
-        r0, theta0 = hlp.xy_to_r_theta(xio, etao)
-        V_inf, R, alpha, epsilon = self.freestream_velocity,  self.cylinder_radius, self.angle_of_attack, self.epsilon
-        acceleration = V_inf*(-1j*Gamma/(2*np.pi*V_inf*chi**2) + 2*np.exp(1j*alpha)*R**2/(chi**3)) / (1 - (R-epsilon)**2/(chi+self.zeta_center)**2)**2
+    def z_analytic_acceleration(self, point_xi_eta_in_z_plane, Gamma):
+        """This function also calculates the acceleration at a given point in the flow field in the z plane according"""
+        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
+        zeta = self.z_to_zeta(z, self.epsilon)
+        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        plus = (z + np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+        minus = (z - np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+        if zeta == plus:
+            dzeta_dz_squared = (z+1)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
+            d2zeta_dz2 = -(2*(R-epsilon)**2)/(z**2-4*(R-epsilon)**2)**(3/2)
+        elif zeta == minus:
+            dzeta_dz_squared = (1-z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
+            d2zeta_dz2 = (2*(R-epsilon)**2)/(z**2-4*(R-epsilon)**2)**(3/2)
+        acceleration_1 = V_inf*(-1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)**2) + 2*np.exp(1j*alpha)*R**2/((zeta-zeta0)**3))*dzeta_dz_squared
+        acceleration_2 = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2)*d2zeta_dz2
+        acceleration = acceleration_1 + acceleration_2
+        # acceleration *= 2*V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2) / (1 - (R-epsilon)**2/(zeta)**2)
         acceleration_complex = np.array([acceleration.real, -acceleration.imag])
-        acceleration_r = np.cos(theta)*acceleration_complex[0] + np.sin(theta)*acceleration_complex[1]
-        acceleration_theta = np.cos(theta)*acceleration_complex[1] - np.sin(theta)*acceleration_complex[0]
-        acceleration_polar = np.array([acceleration_r, acceleration_theta])
-        # print("\n\nradial acceleration!", acceleration_r)
-        # print("theta acceleration!", acceleration_theta)
-        # print("acceleration squared!", polar_acceleration_squared)
-        return acceleration_polar
-    
-    def chi_acceleration_squared(self, point_xy_in_Chi_plane, Gamma):
-        """This function calculates the acceleration squared at a given point in the flow field in the Chi plane"""
-        acceleration = self.chi_acceleration(point_xy_in_Chi_plane, Gamma)
-        acceleration_squared = np.dot(acceleration, acceleration)
-        return acceleration_squared
+        theta = np.arctan2(point_xi_eta_in_z_plane[1], point_xi_eta_in_z_plane[0])
+        polar_acceleration = self.polar_vector(theta, acceleration_complex)
+        return polar_acceleration
 
-    def polar_velocity(self, theta, cartesian_velocity):
+    def pressure_gradient(self, point_xi_eta_in_z_plane, Gamma):
+        """This function calculates the pressure gradient at a given point in the flow field in the z plane"""
+        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
+        zeta = self.z_to_zeta(z, self.epsilon)
+        point_xi_eta_in_zeta_plane = [zeta.real, zeta.imag]
+        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        plus = (z + np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+        minus = (z - np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+        first = -2*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)-(R**2*np.exp(1j*alpha))/(zeta-zeta0)**2)
+        second = -1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)**2 + 2*R**2*np.exp(1j*alpha)/(zeta-zeta0)**3
+        third = np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0) - (R**2*np.exp(1j*alpha))/(zeta-zeta0)**2
+        fourth = (1 - ((R - epsilon)**2)/(zeta**2))
+        if zeta == plus:
+            fifth = (1+z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
+            sixth = (-2*(R - epsilon)**2)/(z**2 - 4*(R - epsilon)**2)**(3/2)
+        if zeta == minus:
+            fifth = (1-z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
+            sixth = (2*(R - epsilon)**2)/((z**2 - 4*(R - epsilon)**2)**(3/2))
+        pressure_gradient = first*(second*fifth + third*sixth) / fourth
+        pressure_gradient_complex = np.array([pressure_gradient.real, -pressure_gradient.imag])
+        theta = np.arctan2(point_xi_eta_in_z_plane[1], point_xi_eta_in_z_plane[0])
+        pressure_gradient_polar = self.polar_vector(theta, pressure_gradient_complex)
+        magnitude_pressure_gradient_complex = np.linalg.norm(pressure_gradient_complex)
+        return magnitude_pressure_gradient_complex
+
+    def polar_vector(self, theta, cartesian_vector):
         """This function converts the cartesian velocity to polar velocity (can go from z, zeta, or chi plane to polar velocity)"""
-        velocity_r = cartesian_velocity[0]*np.cos(theta) + cartesian_velocity[1]*np.sin(theta)
+        r = cartesian_vector[0]*np.cos(theta) + cartesian_vector[1]*np.sin(theta)
         # print("\nradial velocity", velocity_r)
-        velocity_theta = cartesian_velocity[1]*np.cos(theta) - cartesian_velocity[0]*np.sin(theta)
+        theta = cartesian_vector[1]*np.cos(theta) - cartesian_vector[0]*np.sin(theta)
         # print("theta velocity", velocity_theta)
-        polar_velocity = np.array([velocity_r, velocity_theta])
+        polar_velocity = np.array([r, theta])
         return polar_velocity
     
-    def calc_z_G_values(self, xi, eta, alpha, epsilon, R, xio, etao):
-        """Cartesian G values for the z plane"""
-        G1 = (eta-etao)/((xi-xio)**2 + (eta-etao)**2)
-        G2 = (xi-xio)/((xi-xio)**2 + (eta-etao)**2)
-        G3 = R**2*(np.cos(alpha)*((xi-xio)**2-(eta-etao)**2)+2*np.sin(alpha)*((xi-xio)*(eta-etao)))/(((xi-xio)**2 -(eta-etao)**2)**2 + (2*(xi-xio)*(eta-etao))**2)
-        G4 = R**2*(np.sin(alpha)*((xi-xio)**2-(eta-etao)**2)-2*np.cos(alpha)*((xi-xio)*(eta-etao)))/(((xi-xio)**2 -(eta-etao)**2)**2 + (2*(xi-xio)*(eta-etao))**2)
-        G5 = 1 - ((xi**2 - eta**2)*(R-epsilon)**2)/(((xi**2 - eta**2)**2 + (2*xi*eta)**2))
-        G6 = ((2*xi*eta)*(R-epsilon)**2)/(((xi**2 - eta**2)**2 + (2*xi*eta)**2))
-        return G1, G2, G3, G4, G5, G6
-    
-    def calc_Chi_G_values(self, r, theta, alpha, epsilon, R, r0, theta0):
-        """takes in r, theta, alpha, epsilon, R, r0, theta0 and calculates the G values"""
-        G1 = np.sin(theta)/r
-        G2 = np.cos(theta)/r
-        G3 = R**2*np.cos(alpha-2*theta)/r**2
-        G4 = R**2*np.sin(alpha-2*theta)/r**2
-        G5 = 1 - ((R-epsilon)**2*(r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2)
-        G6 = ((R-epsilon)**2*(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2)
-        return G1, G2, G3, G4, G5, G6
-    
-    def all_partials(self, r, theta, alpha, epsilon, R, r0, theta0, Gamma):
-        """This function calculates all the partial derivatives of omega r and omega theta"""
-        G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
-        A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG = self.partial_coefficients_of_omega_r_wrt_G_values(self.freestream_velocity, theta, self.angle_of_attack, G1, G2, G3, G4, G5, G6)
-        A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG = self.partial_coefficients_of_omega_theta_wrt_G_values(self.freestream_velocity, theta, self.angle_of_attack, G1, G2, G3, G4, G5, G6)
-        AGr, BGr, CGr, DGr, EGr, FGr = self.partial_coefficients_of_G_wrt_r(r, theta, alpha, epsilon, R, r0, theta0)
-        AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta = self.partial_coefficients_of_G_wrt_theta(r, theta, alpha, epsilon, R, r0, theta0)
-        # omega r partials
-        d_omega_r_dr = Gamma*A_omega_rG*AGr + Gamma*B_omega_rG*BGr + C_omega_rG*CGr + D_omega_rG*DGr + EGr*(Gamma*E_omega_rG + F_omega_rG) + FGr*(Gamma*G_omega_rG + H_omega_rG)
-        d_omega_r_dtheta = Gamma*A_omega_rG*AGtheta + Gamma*B_omega_rG*BGtheta + C_omega_rG*CGtheta + D_omega_rG*DGtheta + EGtheta*(Gamma*E_omega_rG + F_omega_rG) + FGtheta*(Gamma*G_omega_rG + H_omega_rG)
-        # omega theta partials
-        d_omega_theta_dr = Gamma*A_omega_thetaG*AGr + Gamma*B_omega_thetaG*BGr + C_omega_thetaG*CGr + D_omega_thetaG*DGr + EGr*(Gamma*E_omega_thetaG + F_omega_thetaG) + FGr*(Gamma*G_omega_thetaG + H_omega_thetaG)
-        d_omega_theta_dtheta = Gamma*A_omega_thetaG*AGtheta + Gamma*B_omega_thetaG*BGtheta + C_omega_thetaG*CGtheta + D_omega_thetaG*DGtheta + EGtheta*(Gamma*E_omega_thetaG + F_omega_thetaG) + FGtheta*(Gamma*G_omega_thetaG + H_omega_thetaG)
-        print("d_omega_r_dr:                    ", d_omega_r_dr)
-        print("d_omega_r_dtheta:                    ", d_omega_r_dtheta)
-        print("d_omega_theta_dr                     ", d_omega_theta_dr)
-        print("d_omega_theta_dtheta                     ", d_omega_theta_dtheta)
-        return d_omega_r_dr, d_omega_r_dtheta, d_omega_theta_dr, d_omega_theta_dtheta
-    
-    def partial_coefficients_of_omega_r_wrt_G_values(self, V_inf, theta, alpha, G1, G2, G3, G4, G5, G6):
-        """This function retrieves the partial derivatives of omega r with respect to G values"""
-        # G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
-        # omega r partials with respect to G1, G2, G3, G4, G5, G6
-        A_omega_rG = 1/(2*np.pi)*((G5*np.cos(theta))/(G5**2 + G6**2)+ (G6*np.sin(theta))/(G5**2 + G6**2))
-        B_omega_rG = 1/(2*np.pi)*((G6*np.cos(theta))/(G5**2 + G6**2) - (G5*np.sin(theta))/(G5**2 + G6**2))
-        C_omega_rG = - V_inf*(G5*np.cos(theta)/(G5**2 + G6**2) + G6*np.sin(theta)/(G5**2 + G6**2))
-        D_omega_rG = V_inf*(G5*np.sin(theta)/(G5**2 + G6**2) - G6*np.cos(theta)/(G5**2 + G6**2))
-        E_omega_rG = (G1*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) - (G2*np.sin(theta))/(2*np.pi*(G5**2 + G6**2)) - (G5*np.cos(theta)*(G1*G5 + G2*G6))/(np.pi*(G5**2 + G6**2)**2) - (G5*np.sin(theta)*(G1*G6 - G2*G5))/(np.pi*(G5**2 + G6**2)**2)
-        F_omega_rG = V_inf*((np.sin(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)+(2*G5*np.cos(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2-(2*G5*np.sin(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2)
-        G_omega_rG = (G2*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) + (G1*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) - (G6*np.cos(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2) - (G6*np.sin(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2)
-        H_omega_rG = V_inf*((2*G6*np.cos(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2-(np.sin(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(2*G6*np.sin(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2)
-        return A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG
+    def numerical_convective_acceleration(self, point_xi_eta, Gamma, step=1e-6):
+        """calculates the convective acceleration numerically in the z or chi plane"""
+        if self.is_z:
+            z = point_xi_eta[0] + 1j*point_xi_eta[1]
+            zeta = self.z_to_zeta(z, self.epsilon)
+            point_z = [z.real, z.imag]
+            r, theta = hlp.xy_to_r_theta(zeta.real, zeta.imag)
+            point_r_theta = [hlp.xy_to_r_theta(z.real, z.imag)[0], hlp.xy_to_r_theta(z.real, z.imag)[1]]
+            # r, theta = [point_r_theta[0], point_r_theta[1]]
+            cartesian_z_velocity = self.velocity(point_z, Gamma)
+            polar_z_velocity = self.polar_vector(theta, cartesian_z_velocity)
+            omega_r, omega_theta = polar_z_velocity[0], polar_z_velocity[1]
+            omega_r_plus_dr, omega_r_minus_dr, omega_r_plus_dtheta, omega_r_minus_dtheta, omega_theta_plus_dr, omega_theta_minus_dr, omega_theta_plus_dtheta, omega_theta_minus_dtheta = self.function_plus_minus_step_variable(point_r_theta, Gamma, step, self.velocity)
+        elif self.is_chi:
+            r, theta = hlp.xy_to_r_theta(point_xi_eta[0], point_xi_eta[1])
+            point_r_theta = [r, theta]
+            cartesian_Chi_velocity = self.velocity_chi(point_xi_eta, Gamma)
+            polar_Chi_velocity = self.polar_vector(theta, cartesian_Chi_velocity)
+            omega_r, omega_theta = polar_Chi_velocity[0], polar_Chi_velocity[1]
+            omega_r_plus_dr, omega_r_minus_dr, omega_r_plus_dtheta, omega_r_minus_dtheta, omega_theta_plus_dr, omega_theta_minus_dr, omega_theta_plus_dtheta, omega_theta_minus_dtheta = self.function_plus_minus_step_variable(point_r_theta, Gamma, step, self.velocity_chi)
 
-    def partial_coefficients_of_omega_theta_wrt_G_values(self, V_inf, theta, alpha, G1, G2, G3, G4, G5, G6):
-        """This function retrieves the partial derivatives of omega theta with respect to G values"""
-        A_omega_thetaG = 1/(2*np.pi)*((G6*np.cos(theta))/(G5**2 + G6**2) - (G5*np.sin(theta))/(G5**2 + G6**2))
-        B_omega_thetaG = 1/(2*np.pi)*(-(G5*np.cos(theta))/(G5**2 + G6**2) - (G6*np.sin(theta))/(G5**2 + G6**2))
-        C_omega_thetaG = V_inf*(G5*np.sin(theta)/(G5**2 + G6**2) - G6*np.cos(theta)/(G5**2 + G6**2))
-        D_omega_thetaG = V_inf*(G5*np.cos(theta)/(G5**2 + G6**2) + G6*np.sin(theta)/(G5**2 + G6**2))
-        E_omega_thetaG = -((G2*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) + (G1*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) + (G5*np.cos(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2) - (G5*np.sin(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2))
-        F_omega_thetaG = V_inf*((np.cos(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)+(np.sin(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(2*G5*np.cos(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2-(2*G5*np.sin(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2)
-        G_omega_thetaG = (G1*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) - (G2*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) - (G6*np.cos(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2) + (G6*np.sin(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2)
-        H_omega_thetaG = V_inf*((np.sin(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(2*G6*np.cos(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2-(2*G6*np.sin(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2)
-        return A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG
-
-    def partial_coefficients_of_G_wrt_r(self, r, theta, alpha, epsilon, R, r0, theta0):
-        """This function retrieves the partial derivatives of G values with respect to r"""
-        AGr = -np.sin(theta)/r**2
-        BGr = -np.cos(theta)/r**2
-        CGr = (R**2*(r**2*np.cos(2*theta)*np.cos(alpha) + r**2*np.sin(2*theta)*np.sin(alpha))*(2*r**3*(np.cos(4*theta) - 1) - 4*r**3*np.cos(2*theta)**2))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)**2 - (R**2*(2*r*np.cos(2*theta)*np.cos(alpha) + 2*r*np.sin(2*theta)*np.sin(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)
-        DGr = (R**2*(r**2*np.cos(2*theta)*np.sin(alpha) - r**2*np.sin(2*theta)*np.cos(alpha))*(2*r**3*(np.cos(4*theta) - 1) - 4*r**3*np.cos(2*theta)**2))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)**2 - (R**2*(2*r*np.cos(2*theta)*np.sin(alpha) - 2*r*np.sin(2*theta)*np.cos(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)
-        EGr = ((R - epsilon)**2*(2*(2*r*np.cos(2*theta) + 2*r0*np.cos(theta + theta0))*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2) + 2*(2*r*np.sin(2*theta) + 2*r0*np.sin(theta + theta0))*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)**2 - ((R - epsilon)**2*(2*r*np.cos(2*theta) + 2*r0*np.cos(theta + theta0)))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)
-        FGr= ((2*r*np.sin(2*theta) + 2*r0*np.sin(theta + theta0))*(R - epsilon)**2)/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2) - ((R - epsilon)**2*(2*(2*r*np.cos(2*theta) + 2*r0*np.cos(theta + theta0))*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2) + 2*(2*r*np.sin(2*theta) + 2*r0*np.sin(theta + theta0))*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)**2
-        return AGr, BGr, CGr, DGr, EGr, FGr
-
-    def partial_coefficients_of_G_wrt_theta(self, r, theta, alpha, epsilon, R, r0, theta0):
-        AGtheta = np.cos(theta)/r
-        BGtheta  = -np.sin(theta)/r
-        CGtheta = -(R**2*(2*r**2*np.cos(2*theta)*np.sin(alpha) - 2*r**2*np.sin(2*theta)*np.cos(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2) - (R**2*(2*r**4*np.sin(4*theta) - 4*r**4*np.cos(2*theta)*np.sin(2*theta))*(r**2*np.cos(2*theta)*np.cos(alpha) + r**2*np.sin(2*theta)*np.sin(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)**2
-        DGtheta = (R**2*(2*r**2*np.cos(2*theta)*np.cos(alpha) + 2*r**2*np.sin(2*theta)*np.sin(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2) - (R**2*(2*r**4*np.sin(4*theta) - 4*r**4*np.cos(2*theta)*np.sin(2*theta))*(r**2*np.cos(2*theta)*np.sin(alpha) - r**2*np.sin(2*theta)*np.cos(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)**2
-        EGtheta = ((R - epsilon)**2*(2*np.sin(2*theta)*r**2 + 2*r0*np.sin(theta + theta0)*r))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2) - ((2*(2*np.sin(2*theta)*r**2 + 2*r0*np.sin(theta + theta0)*r)*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2) - 2*(2*np.cos(2*theta)*r**2 + 2*r0*np.cos(theta + theta0)*r)*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))*(R - epsilon)**2*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)**2
-        FGtheta = ((R - epsilon)**2*(2*np.cos(2*theta)*r**2 + 2*r0*np.cos(theta + theta0)*r))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2) + ((2*(2*np.sin(2*theta)*r**2 + 2*r0*np.sin(theta + theta0)*r)*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2) - 2*(2*np.cos(2*theta)*r**2 + 2*r0*np.cos(theta + theta0)*r)*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))*(R - epsilon)**2*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)**2
-        return AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta
-    
-    def calc_A1_through_A12(self,  V_inf, theta, alpha, G1, G2, G3, G4, G5, G6, A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG, A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG, AGr, BGr, CGr, DGr, EGr, FGr, AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta):
-        """This function calculates the A1 through A12 values"""
-        A1 = 1/(2*np.pi)*(np.cos(theta)*(G1*G5+G2*G6)/(G5**2 + G6**2) - np.sin(theta)*(G2*G5-G1*G6)/(G5**2 + G6**2))
-        A2 = V_inf*(np.cos(theta)*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2) + np.sin(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
-        A3 = 1/(2*np.pi)*(-np.cos(theta)*(G2*G5-G1*G6)/(G5**2 + G6**2) - np.sin(theta)*(G1*G5+G2*G6)/(G5**2 + G6**2))
-        A4 = V_inf*(np.cos(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2) - np.sin(theta)*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
-        A5 = A_omega_rG*AGr + B_omega_rG*BGr + E_omega_rG*EGr + G_omega_rG*FGr
-        A6 = C_omega_rG*CGr + D_omega_rG*DGr + F_omega_rG*EGr + H_omega_rG*FGr
-        A7 = A_omega_rG*AGtheta + B_omega_rG*BGtheta + E_omega_rG*EGtheta + G_omega_rG*FGtheta
-        A8 = C_omega_rG*CGtheta + D_omega_rG*DGtheta + F_omega_rG*EGtheta + H_omega_rG*FGtheta
-        A9 = A_omega_thetaG*AGtheta + B_omega_thetaG*BGtheta + E_omega_thetaG*EGtheta + G_omega_thetaG*FGtheta
-        A10 = C_omega_thetaG*CGtheta + D_omega_thetaG*DGtheta + F_omega_thetaG*EGtheta + H_omega_thetaG*FGtheta
-        A11 = A_omega_thetaG*AGr + B_omega_thetaG*BGr + E_omega_thetaG*EGr + G_omega_thetaG*FGr
-        A12 = C_omega_thetaG*CGr + D_omega_thetaG*DGr + F_omega_thetaG*EGr + H_omega_thetaG*FGr
-        return A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12
-
-    def chi_partial_derivatives(self, Gamma, A5, A6, A7, A8, A9, A10, A11, A12):
-        """This function retrieves the values of the partial derivatives of omega r and omega theta with respect to r and theta"""
-        partial_omega_r_wrt_r = Gamma*A5 + A6
-        partial_omega_r_wrt_theta = Gamma*A7 + A8
-        partial_omega_theta_wrt_theta = Gamma*A9 + A10
-        partial_omega_theta_wrt_r = Gamma*A11 + A12
-        return partial_omega_r_wrt_r, partial_omega_r_wrt_theta, partial_omega_theta_wrt_theta, partial_omega_theta_wrt_r
-    
-    def calc_B1_through_B6(self, r, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12):
-        """This function calculates the B1 through B6 values"""
-        B1 = A1*A5 + (1/r)*(A3*(A7-A3))
-        B2 = A1*A6 + A2*A5 + (1/r)*(A3*A8 + A4*(A7-2*A3))
-        B3 = A2*A6 + (1/r)*(A4*(A8-A4))
-        B4 = A1*A11 + (1/r)*(A3*(A9+A1))
-        B5 = A1*A12 + A2*A11 + (1/r)*(A3*(A10+A2) + A4*(A9+A1))
-        B6 = A2*A12 + (1/r)*(A4*(A10+A2))
-        return B1, B2, B3, B4, B5, B6
-    
-    def calc_C1_through_C5(self, B1, B2, B3, B4, B5, B6):
-        """This function calculates the C1 through C5 values"""
-        C1 = B1**2 + B4**2
-        C2 = 2*(B1*B2 + B4*B5)
-        C3 = 2*(B1*B3 + B4*B6) + B2**2 + B5**2
-        C4 = 2*(B2*B3 + B5*B6)
-        C5 = B3**2 + B6**2
-        return C1, C2, C3, C4, C5
-    
-    def chi_convective_acceleration(self, point_xy_in_Chi_plane, Gamma):
-        """Start with a Chi value that is shifted from zeta_center"""
-        xi, eta = point_xy_in_Chi_plane[0], point_xy_in_Chi_plane[1]
-        r, theta = hlp.xy_to_r_theta(xi, eta)
-        xio, etao = self.zeta_center.real, self.zeta_center.imag
-        r0, theta0 = hlp.xy_to_r_theta(xio, etao)
-        V_inf, R, alpha, epsilon = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.epsilon
-        # omega_chi_unsplit = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(xi+1j*eta)) - np.exp(1j*alpha)*R**2/(xi+1j*eta)**2) / (1 - (R-epsilon)**2/(xi+xio+1j*(eta+etao))**2)
-        G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
-        # velocity_r = np.cos(theta)*Gamma/(2*np.pi)*(G1*G5+G2*G6)/(G5**2 + G6**2)+np.cos(theta)*V_inf*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2) - np.sin(theta)*Gamma/(2*np.pi)*(G2*G5-G1*G6)/(G5**2 + G6**2) + np.sin(theta)*V_inf*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2)
-        # velocity_theta = np.cos(theta)*V_inf*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2) - np.cos(theta)*Gamma/(2*np.pi)*(G2*G5-G1*G6)/(G5**2 + G6**2) - np.sin(theta)*Gamma/(2*np.pi)*(G1*G5+G2*G6)/(G5**2 + G6**2) - np.sin(theta)*V_inf*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2)
-        A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG = self.partial_coefficients_of_omega_r_wrt_G_values(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6)
-        A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG = self.partial_coefficients_of_omega_theta_wrt_G_values(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6)
-        AGr, BGr, CGr, DGr, EGr, FGr = self.partial_coefficients_of_G_wrt_r(r, theta, alpha, epsilon, R, r0, theta0)
-        AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta = self.partial_coefficients_of_G_wrt_theta(r, theta, alpha, epsilon, R, r0, theta0)
-        # calculate the A1 through A12 values
-        A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12 = self.calc_A1_through_A12(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6, A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG, A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG, AGr, BGr, CGr, DGr, EGr, FGr, AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta)
-        # omega_r, omega_theta = Gamma*A1 + A2, Gamma*A3 + A4
-        # partial_omega_r_wrt_r, partial_omega_r_wrt_theta, partial_omega_theta_wrt_theta, partial_omega_theta_wrt_r = self.chi_partial_derivatives(Gamma, A5, A6, A7, A8, A9, A10, A11, A12)
-        B1, B2, B3, B4, B5, B6 = self.calc_B1_through_B6(r, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12)
-        convective_acceleration = np.array([Gamma**2*B1 + Gamma*B2 + B3, Gamma**2*B4 + Gamma*B5 + B6])
-        C1, C2, C3, C4, C5 = self.calc_C1_through_C5(B1, B2, B3, B4, B5, B6)
-        return C1, C2, C3, C4, C5, convective_acceleration
-    
-    def convective_acceleration_squared(self, point_xy_in_Chi_plane, Gamma):
-        """This function calculates the convective acceleration squared"""
-        C1, C2, C3, C4, C5, chi_convective_acceleration = self.chi_convective_acceleration(point_xy_in_Chi_plane, Gamma)
-        # convective_acceleration_squared = np.dot(chi_convective_acceleration, chi_convective_acceleration)
-        convective_acceleration_squared = Gamma**4*C1 + Gamma**3*C2 + Gamma**2*C3 + Gamma*C4 + C5
-        return convective_acceleration_squared
-    
-    def numerical_convective_acceleration(self, point_xy_in_Chi_plane, Gamma, step):
-        """calculates the convective acceleration numerically"""
-        Chi = point_xy_in_Chi_plane[0] + 1j*point_xy_in_Chi_plane[1]
-        zeta = self.Chi_to_zeta(Chi)
-        z = self.zeta_to_z(zeta)
-        
-        # r, theta = hlp.xy_to_r_theta(Chi.real, Chi.imag)
-        # cartesian_velocity_chi = self.velocity_chi(point_xy_in_Chi_plane, Gamma)
-        # polar_velocity_chi = self.polar_velocity(theta, cartesian_velocity_chi)
-        # omega_r, omega_theta = polar_velocity_chi[0], polar_velocity_chi[1]
-        # step_point = point_xy_in_Chi_plane
-
-        r, theta = hlp.xy_to_r_theta(z.real, z.imag)
-        point_xy_in_Z_plane = [z.real, z.imag]
-        cartesian_z_velocity = self.velocity(point_xy_in_Z_plane, Gamma)
-        polar_z_velocity = self.polar_velocity(theta, cartesian_z_velocity)
-        omega_r, omega_theta = polar_z_velocity[0], polar_z_velocity[1]
-        step_point = point_xy_in_Z_plane
-        
-        omega_r_plus_dr, omega_r_minus_dr, omega_r_plus_dtheta, omega_r_minus_dtheta, omega_theta_plus_dr, omega_theta_minus_dr, omega_theta_plus_dtheta, omega_theta_minus_dtheta = self.function_plus_minus_step_variable(step_point, Gamma, step)
         # calculate the partial derivatives of omega r with respect to r and theta
         partial_omega_r_wrt_r = hlp.central_difference(omega_r_plus_dr, omega_r_minus_dr, step)
-        # print("numerical partial omega r wrt r: ", partial_omega_r_wrt_r)
         partial_omega_r_wrt_theta = hlp.central_difference(omega_r_plus_dtheta, omega_r_minus_dtheta, step)
-        # print("numerical partial omega r wrt theta: ", partial_omega_r_wrt_theta)
         # calculate the partial derivatives of omega theta with respect to r and theta
         partial_omega_theta_wrt_r = hlp.central_difference(omega_theta_plus_dr, omega_theta_minus_dr, step)
-        # print("numerical partial omega theta wrt r: ", partial_omega_theta_wrt_r)
         partial_omega_theta_wrt_theta = hlp.central_difference(omega_theta_plus_dtheta, omega_theta_minus_dtheta, step)
-        # print("numerical partial omega theta wrt theta: ", partial_omega_theta_wrt_theta)
         # calculate the convective acceleration
         convective_acceleration_r = omega_r*partial_omega_r_wrt_r + (omega_theta/r)*partial_omega_r_wrt_theta - omega_theta**2/r
         convective_acceleration_theta = omega_r*partial_omega_theta_wrt_r + (omega_theta/r)*partial_omega_theta_wrt_theta + omega_r*omega_theta/r
         convective_acceleration = np.array([convective_acceleration_r, convective_acceleration_theta])
         return convective_acceleration
     
-    def numerical_convective_acceleration_squared(self, numerical_convective_acceleration):
-        """Calculates the convective acceleration squared numerically"""
-        convective_acceleration_squared = np.dot(numerical_convective_acceleration, numerical_convective_acceleration)
-        return convective_acceleration_squared
-        
-    def function_plus_minus_step_variable(self, point_xy, Gamma, stepsize):
+    def function_plus_minus_step_variable(self, point_r_theta, Gamma, stepsize, vel_func: callable):
         """takes in a function and returns the function plus and minus a stepsize"""
-        r, theta = hlp.xy_to_r_theta(point_xy[0], point_xy[1])
+        r, theta = point_r_theta[0], point_r_theta[1]
         r_plus, r_minus = r + stepsize, r - stepsize
         theta_plus, theta_minus = theta + stepsize, theta - stepsize
+
         x_r_plus, x_r_minus, y_r_plus, y_r_minus = hlp.r_theta_to_xy(r_plus, theta)[0], hlp.r_theta_to_xy(r_minus, theta)[0], hlp.r_theta_to_xy(r_plus, theta)[1], hlp.r_theta_to_xy(r_minus, theta)[1]
         x_theta_plus, x_theta_minus, y_theta_plus, y_theta_minus = hlp.r_theta_to_xy(r, theta_plus)[0], hlp.r_theta_to_xy(r, theta_minus)[0], hlp.r_theta_to_xy(r, theta_plus)[1], hlp.r_theta_to_xy(r, theta_minus)[1]
-        omega_xy_plus_r, omega_xy_minus_r = self.velocity([x_r_plus, y_r_plus], Gamma), self.velocity([x_r_minus, y_r_minus], Gamma)
-        omega_xy_plus_theta, omega_xy_minus_theta = self.velocity([x_theta_plus, y_theta_plus], Gamma), self.velocity([x_theta_minus, y_theta_minus], Gamma)
-        omega_r_plus_dr, omega_r_minus_dr = self.polar_velocity(theta, omega_xy_plus_r)[0], self.polar_velocity(theta, omega_xy_minus_r)[0]
-        omega_r_plus_dtheta, omega_r_minus_dtheta = self.polar_velocity(theta, omega_xy_plus_theta)[0], self.polar_velocity(theta, omega_xy_minus_theta)[0]
-        omega_theta_plus_dr, omega_theta_minus_dr = self.polar_velocity(theta, omega_xy_plus_r)[1], self.polar_velocity(theta, omega_xy_minus_r)[1]
-        omega_theta_plus_dtheta, omega_theta_minus_dtheta = self.polar_velocity(theta, omega_xy_plus_theta)[1], self.polar_velocity(theta, omega_xy_minus_theta)[1]
+        omega_xy_plus_r, omega_xy_minus_r = vel_func([x_r_plus, y_r_plus], Gamma), vel_func([x_r_minus, y_r_minus], Gamma)
+        omega_xy_plus_theta, omega_xy_minus_theta = vel_func([x_theta_plus, y_theta_plus], Gamma), vel_func([x_theta_minus, y_theta_minus], Gamma)
+        omega_r_plus_dr, omega_r_minus_dr = self.polar_vector(theta, omega_xy_plus_r)[0], self.polar_vector(theta, omega_xy_minus_r)[0]
+        omega_r_plus_dtheta, omega_r_minus_dtheta = self.polar_vector(theta, omega_xy_plus_theta)[0], self.polar_vector(theta, omega_xy_minus_theta)[0]
+        omega_theta_plus_dr, omega_theta_minus_dr = self.polar_vector(theta, omega_xy_plus_r)[1], self.polar_vector(theta, omega_xy_minus_r)[1]
+        omega_theta_plus_dtheta, omega_theta_minus_dtheta = self.polar_vector(theta, omega_xy_plus_theta)[1], self.polar_vector(theta, omega_xy_minus_theta)[1]
         return omega_r_plus_dr, omega_r_minus_dr, omega_r_plus_dtheta, omega_r_minus_dtheta, omega_theta_plus_dr, omega_theta_minus_dr, omega_theta_plus_dtheta, omega_theta_minus_dtheta
 
-    def convective_acceleration_squared_numerical(self, point_xy_in_Chi_plane, Gamma, step):
-        """Calculates the convective acceleration squared numerically"""
-        convective_acceleration = self.numerical_convective_acceleration(point_xy_in_Chi_plane, Gamma, step)
-        convective_acceleration_squared = np.dot(convective_acceleration, convective_acceleration)
-        return convective_acceleration_squared
-
-    def numerical_appellian(self, Gamma_range: list, r_range: list, theta_range: list, is_analytic_conv_accel: bool, step): # uses analytic expression for convection acceleration
-        """This function calculates the Appellian function numerically requires evenly spaced ranges for Gamma, r, and theta"""
-        # create a meshgrid of r and theta values, the first value in r_range is the lower bound the second value is the upper bound, the third value is the increment size
-        if is_analytic_conv_accel:
-            print("ANALYTIC CONVECTIVE ACCELERATION")
-            Gamma_values = hlp.list_to_range(Gamma_range)
-            r_values = hlp.list_to_range(r_range)
-            theta_values = hlp.list_to_range(theta_range)
-            # calculate the area element         
-            dr = r_values[1] - r_values[0] ## test dr values to see if there's some weird convergence thing going on. 
-            print("dr: ", dr)
-            dtheta = theta_values[1] - theta_values[0]
-            print("dtheta: ", dtheta)
-            # # The appellian sums the squared convective acceleration at each r and theta value. Plot the Appellian function with respect to each change in Gamma. 
-            # this is a nested loop with Gamma as the outer loop, r as the middle loop, and theta as the inner loop
-            Appellian_array = np.zeros((len(Gamma_values),1))
-            xi_eta_values = np.zeros((len(r_values), len(theta_values), 2))
-            Appellian_value = 0.0
+    def appellian_acceleration_loop(self, Gamma_values: np.array, r_values: np.array, theta_values: np.array, dr: float, dtheta: float, is_Chi: bool, acceleration: callable):
+        """"""
+        index = 0
+        Appellian_value = 0.0
+        Appellian_array = np.zeros((len(Gamma_values), 2))
+        xi_eta_values = np.zeros((len(r_values)*len(theta_values), 2))
+        if is_Chi:
             for i in range(len(Gamma_values)):
                 for j in range(len(r_values)):
                     for k in range(len(theta_values)):
-                        xi, eta = hlp.r_theta_to_xy(r_values[j], theta_values[k])
+                        Chi_val = hlp.r_theta_to_xy(r_values[j], theta_values[k])[0] + 1j*hlp.r_theta_to_xy(r_values[j], theta_values[k])[1] # the r, theta point in the Chi plane is converted to a complex number
                         area_element = r_values[j]*dr*dtheta
-                        Appellian_value += self.convective_acceleration_squared([xi, eta], Gamma_values[i])*area_element
-                        # if j and k are the last values in the range, then the Appellian value is complete and should be appended to the Appellian list, then the appellian value should be reset to 0
-                        if j == len(r_values)-1 and k == len(theta_values)-1:
-                            xi_eta_values[j][k] = [xi, eta]
-                            Appellian_array[i] = Appellian_value
-                            Appellian_value = 0.0
-                        else:
-                            pass # pass means do nothing
-            print("Min Appellian Value for Analytic Conv Accel: ", np.min(Appellian_array))
-            index_min = np.argmin(Appellian_array)
-            print("Index of Min Appellian Value: ", index_min)
-            print("Gamma Value at Min Appellian Value for Analytic Conv Accel: ", Gamma_values[index_min]) 
-            plt.plot(Gamma_values, Appellian_array)
-            plt.xlabel("$\\Gamma$")
-            plt.ylabel("S")
-            plt.title("Appellian Function (Analytic Convective Acceleration)")
-            plt.show()
+                        convective_acceleration = acceleration([Chi_val.real, Chi_val.imag], Gamma_values[i])
+                        Appellian_value += np.dot(convective_acceleration, convective_acceleration)*area_element
+                        xi_eta_values[index] = [Chi_val.real, Chi_val.imag]
+                        index += 1
+                Appellian_array[i] = [Gamma_values[i], 0.5*Appellian_value]
+                Appellian_value = 0.0
+                index = 0
         else:
-            print("NUMERICAL CONVECTIVE ACCELERATION")
-            Gamma_values = hlp.list_to_range(Gamma_range)
-            r_values = hlp.list_to_range(r_range)
-            theta_values = hlp.list_to_range(theta_range)
-            # calculate the area element         
-            dr = r_values[1] - r_values[0] ## test dr values to see if there's some weird convergence thing going on. 
-            print("dr: ", dr)
-            dtheta = theta_values[1] - theta_values[0]
-            print("dtheta: ", dtheta)
-            # # The appellian sums the squared convective acceleration at each r and theta value. Plot the Appellian function with respect to each change in Gamma. 
-            # this is a nested loop with Gamma as the outer loop, r as the middle loop, and theta as the inner loop
-            Appellian_array = np.zeros((len(Gamma_values),1))
-            xi_eta_values = np.zeros((len(r_values), len(theta_values), 2))
-            Appellian_value = 0.0
             for i in range(len(Gamma_values)):
                 for j in range(len(r_values)):
                     for k in range(len(theta_values)):
-                        xi, eta = hlp.r_theta_to_xy(r_values[j], theta_values[k])
-                        area_element = r_values[j]*dr*dtheta
-                        Appellian_value += self.convective_acceleration_squared_numerical([xi, eta], Gamma_values[i], step)*area_element
-                        # if j and k are the last values in the range, then the Appellian value is complete and should be appended to the Appellian list, then the appellian value should be reset to 0
-                        if j == len(r_values)-1 and k == len(theta_values)-1:
-                            xi_eta_values[j][k] = [xi, eta]
-                            Appellian_array[i] = Appellian_value
-                            Appellian_value = 0.0
-                        else:
-                            pass # pass means do nothing
-
-            print("Min Appellian Value for Numerical Conv Accel: ", np.min(Appellian_array))
-            index_min = np.argmin(Appellian_array)
-            print("Index of Min Appellian Value: ", index_min)
-            print("Gamma Value at Min Appellian Value for Numerical Conv Accel: ", Gamma_values[index_min])
-            # plot the Appellian function with respect to Gamma 
-            plt.plot(Gamma_values, Appellian_array)
-            plt.xlabel("$\\Gamma$")
-            plt.ylabel("S")
-            plt.title("Appellian Function (Numerical Convective Acceleration)")
-            plt.show()
+                        Chi = hlp.r_theta_to_xy(r_values[j], theta_values[k])[0] + 1j*hlp.r_theta_to_xy(r_values[j], theta_values[k])[1] # the r, theta point in the Chi plane is converted to a complex number
+                        zeta = self.Chi_to_zeta(Chi)
+                        z = self.zeta_to_z(zeta, self.epsilon)
+                        r_z = hlp.xy_to_r_theta(z.real, z.imag)[0]
+                        area_element = r_z * dr * dtheta
+                        convective_acceleration = acceleration([z.real, z.imag], Gamma_values[i])
+                        Appellian_value += np.dot(convective_acceleration, convective_acceleration)*area_element
+                        xi_eta_values[index] = [z.real, z.imag]
+                        index += 1
+                Appellian_array[i] = [Gamma_values[i], 0.5*Appellian_value]
+                Appellian_value = 0.0
+                index = 0
+        return Appellian_array, xi_eta_values
+        
+    def numerically_integrate_appellian(self, Gamma_range: list, r_range: list, theta_range: list, is_analytic_accel: bool):
+        """This function calculates the Appellian function numerically requires evenly spaced ranges for Gamma, r, and theta in Chi"""
+        # create a meshgrid of r and theta values, the first value in r_range is the lower bound the second value is the upper bound, the third value is the increment size
+        Gamma_values = hlp.list_to_range(Gamma_range)
+        r_values = hlp.list_to_range(r_range)
+        theta_values = hlp.list_to_range(theta_range)
+        # calculate the area element 
+        if len(r_values) == 1:
+            dr = 1.0
+        else:        
+            dr = r_values[1] - r_values[0]
+        if len(theta_values) == 1:
+            dtheta = 1.0
+        else:
+            dtheta = theta_values[1] - theta_values[0]
+        dr_original, dtheta_original = dr, dtheta
+        # now get dr and dtheta in z plane using the zeta to z function 
+        d_zeta = hlp.r_theta_to_xy(dr, dtheta)[0] + 1j*hlp.r_theta_to_xy(dr, dtheta)[1]
+        d_z = self.zeta_to_z(d_zeta, self.epsilon)
+        d_xi_z, d_eta_z = d_z.real, d_z.imag
+        # now these are the dr and dtheta values in the z plane
+        dr, dtheta = hlp.xy_to_r_theta(d_xi_z, d_eta_z)
+        n = len(r_values)*len(theta_values)
+        if is_analytic_accel and self.is_chi:
+            print("ANALYTIC CONVECTIVE ACCELERATION IN CHI")
+            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr_original, dtheta_original, True, self.chi_convective_acceleration)
+        elif is_analytic_accel and self.is_z:
+            print("ANALYTIC CONVECTIVE ACCELERATION IN Z")
+            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr, dtheta, False, self.z_convective_acceleration)
+        elif is_analytic_accel and self.is_pressure_gradient: 
+            print("ANALYTIC PRESSURE GRADIENT")
+            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr, dtheta, False, self.pressure_gradient)
+        elif not is_analytic_accel and self.is_z:
+            print("NUMERICAL CONVECTIVE ACCELERATION IN Z")
+            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr, dtheta, False, self.numerical_convective_acceleration)
+        elif not is_analytic_accel and self.is_chi:
+            print("NUMERICAL CONVECTIVE ACCELERATION IN CHI")
+            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr_original, dtheta_original, True, self.numerical_convective_acceleration)
+        else:
+            raise ValueError("The function you are trying to use is not implemented")
         return Appellian_array, xi_eta_values
     
+    
+    def integrand(self, theta, r, is_Chi, acceleration, Gamma):
+        if is_Chi:
+            Chi_val = hlp.r_theta_to_xy(r, theta)[0] + 1j * hlp.r_theta_to_xy(r, theta)[1]
+            convective_acceleration = acceleration([Chi_val.real, Chi_val.imag], Gamma)
+        else:
+            Chi = hlp.r_theta_to_xy(r, theta)[0] + 1j * hlp.r_theta_to_xy(r, theta)[1]
+            zeta = self.Chi_to_zeta(Chi)
+            z = self.zeta_to_z(zeta, self.epsilon)
+            r_z = hlp.xy_to_r_theta(z.real, z.imag)[0]
+            convective_acceleration = acceleration([z.real, z.imag], Gamma)
+            r = r_z  # Modify r for area element
+        area_element = r  # Since dA = r dr dtheta in polar coordinates
+        return np.dot(convective_acceleration, convective_acceleration) * area_element
+
+    
+    def appellian_acceleration_integral(self, Gamma, r_min, r_max, theta_min, theta_max, is_Chi, acceleration):
+        """
+        Compute the integral using scipy.dblquad instead of loops.
+        """
+        # Perform double integration over r and theta
+        f = lambda r, theta: self.integrand(theta, r, is_Chi, acceleration, Gamma)
+        result, _ = dblquad(f, theta_min, theta_max, r_min, r_max)
+        return 0.5 * result
+
+    def numerically_dbquad_integrate_appellian(self, Gamma_range, r_range, theta_range, is_analytic_accel):
+        """
+        Integrate the Appellian function using dblquad.
+        """
+        Gamma_values = hlp.list_to_range(Gamma_range)
+        r_values = hlp.list_to_range(r_range)
+        theta_values = hlp.list_to_range(theta_range)
+
+        r_min, r_max = r_values[0], r_values[-1]
+        theta_min, theta_max = theta_values[0], theta_values[-1]
+
+        Appellian_array = np.zeros((len(Gamma_values), 2))
+        if is_analytic_accel and self.is_chi:
+            print("ANALYTIC CONVECTIVE ACCELERATION IN CHI")
+            acceleration_func = self.chi_convective_acceleration
+        elif is_analytic_accel and self.is_z:
+            print("ANALYTIC CONVECTIVE ACCELERATION IN Z")
+            acceleration_func = self.z_convective_acceleration
+        elif is_analytic_accel and self.is_pressure_gradient:
+            print("ANALYTIC PRESSURE GRADIENT")
+            acceleration_func = self.pressure_gradient
+        elif not is_analytic_accel and self.is_z:
+            print("NUMERICAL CONVECTIVE ACCELERATION IN Z")
+            acceleration_func = self.numerical_convective_acceleration
+        elif not is_analytic_accel and self.is_chi:
+            print("NUMERICAL CONVECTIVE ACCELERATION IN CHI")
+            acceleration_func = self.numerical_convective_acceleration
+        else:
+            raise ValueError("Invalid acceleration function.")
+        for i in tqdm(range(len(Gamma_values)), desc="Calculating Appellian function"):
+            Gamma = Gamma_values[i]
+            Appellian_array[i] = [Gamma, self.appellian_acceleration_integral(Gamma, r_min, r_max, theta_min, theta_max, self.is_chi, acceleration_func)]
+        return Appellian_array
+
     def r_theta_Chi_to_r_theta_zeta(self, r_Chi, theta_Chi):
         """This function takes in r and theta in the Chi plane and returns r and theta in the zeta plane"""
         xi_Chi, eta_Chi = hlp.r_theta_to_xy(r_Chi, theta_Chi)
         xi_zeta, eta_zeta = xi_Chi + self.zeta_center.real, eta_Chi + self.zeta_center.imag
         r_zeta, theta_zeta = hlp.xy_to_r_theta(xi_zeta, eta_zeta)
         return r_zeta, theta_zeta
+    
+    def r_theta_zeta_to_r_theta_z(self, r_zeta, theta_zeta):
+        """This function takes in r and theta in the zeta plane and returns r and theta in the z plane"""
+        xi_zeta, eta_zeta = hlp.r_theta_to_xy(r_zeta, theta_zeta)
+        point_xi_eta_in_zeta = xi_zeta + 1j*eta_zeta
+        z = self.zeta_to_z(point_xi_eta_in_zeta, self.epsilon)
+        r_z, theta_z = hlp.xy_to_r_theta(z.real, z.imag)
+        return r_z, theta_z
 
-    def zeta_to_z(self, zeta: complex):
+    def zeta_to_z(self, zeta: complex, epsilon: float):
         """This function takes in a zeta coordinate and returns the z coordinate"""
         if np.isclose(zeta.real, 0.0) and np.isclose(zeta.imag, 0.0):
             z = zeta
         else:
-            z = zeta + (self.cylinder_radius - self.epsilon)**2/zeta # eq 96
+            z = zeta + (self.cylinder_radius - epsilon)**2/zeta # eq 96
         return z
     
     def zeta_to_Chi(self, zeta: complex):
@@ -567,9 +486,9 @@ class cylinder(potential_flow_object):
         zeta = Chi + self.zeta_center
         return zeta
 
-    def z_to_zeta(self, z: complex): # eq 104 
+    def z_to_zeta(self, z: complex, epsilon: float): # eq 104 
         """This function takes in a z coordinate and returns the zeta coordinate"""
-        z_1 = z**2 - 4*(self.cylinder_radius - self.epsilon)**2
+        z_1 = z**2 - 4*(self.cylinder_radius - epsilon)**2
         if z_1.real > 0:
             zeta = (z + np.sqrt(z_1))/2
             zeta_2 = (z - np.sqrt(z_1))/2
@@ -593,6 +512,11 @@ class cylinder(potential_flow_object):
         zeta_center = self.cylinder_radius*(first + second) # eq 152 in complex variables
         return zeta_center
     
+    def calc_J_airfoil_thickness(self, CLd):
+        """This function calculates the thickness of the airfoil"""
+        thickness = -3*np.sqrt(3)/4 + (3*np.sqrt(3)*CLd)/(8*np.pi*(self.zeta_center.imag/self.cylinder_radius))  # rearrangement of eq 152 in complex variables
+        return thickness
+
     def calc_J_airfoil_epsilon(self):
         """This function calculates the epsilon of the airfoil"""
         epsilon = self.cylinder_radius - 1*np.sqrt(self.cylinder_radius**2-self.zeta_center.imag**2)-self.zeta_center.real # eq 113 in complex variables
@@ -632,8 +556,8 @@ class cylinder(potential_flow_object):
     def calc_J_airfoil_c4(self):
         """This function calculates the c4 location of the airfoil"""
         zeta_leading_edge, zeta_trailing_edge = self.calc_zeta_real_intercepts()
-        z_leading_edge = self.zeta_to_z(zeta_leading_edge)
-        z_trailing_edge = self.zeta_to_z(zeta_trailing_edge)
+        z_leading_edge = self.zeta_to_z(zeta_leading_edge, self.epsilon)
+        z_trailing_edge = self.zeta_to_z(zeta_trailing_edge, self.epsilon)
         c4 = (3*z_leading_edge+z_trailing_edge)/4
         return c4
     
@@ -682,62 +606,221 @@ class cylinder(potential_flow_object):
         np.savetxt(file_name, self.surface_points, delimiter = ",", header = "x, y", comments = "")
         print("Geometry exported to", file_name)
 
-    def test_appellian_stuff(self):
-        zeta_test = 10 - 1j*4
-        Gamma = self.circulation
-        # z_test = cyl.zeta_to_z(zeta_test)
-        chi_test = self.zeta_to_Chi(zeta_test)
-        print("\n")
-        z_test = cyl.zeta_to_z(zeta_test)
-        complex_zeta_center = self.zeta_center.real + 1j*self.zeta_center.imag
-        z_0 = cyl.zeta_to_z(complex_zeta_center)
-        # print("z_0: ", z_0)
-        zeta_test = [zeta_test.real, zeta_test.imag]
-        theta_zeta = np.arctan2(zeta_test[1], zeta_test[0])
-        z_test = [z_test.real, z_test.imag]
-        # theta_z = np.arctan2(z_test[1], z_test[0])
-        chi_test = [chi_test.real, chi_test.imag]
-        theta_chi = np.arctan2(chi_test[1], chi_test[0])
-        z_velocity_at_z_test = self.velocity(z_test, Gamma)
-        z_split_velocity_at_z_test = self.split_velocity_z(z_test, Gamma)
-        # print("z_velocity_at_z_test    :", z_velocity_at_z_test[0], z_velocity_at_z_test[1])
-        velocity_chi_at_chi_test = self.velocity_chi(chi_test, Gamma)
-        # print("velocity_chi_at_chi_test:", velocity_chi_at_chi_test[0], velocity_chi_at_chi_test[1])
-        z_polar = self.polar_velocity(theta_zeta, z_velocity_at_z_test)
-        Chi_polar = self.polar_velocity(theta_chi, velocity_chi_at_chi_test)
-        z_polar_mag = np.sqrt(z_polar[0]**2 + z_polar[1]**2)
-        # print("z_polar_mag  :", z_polar_mag)
-        Chi_polar_mag = np.sqrt(Chi_polar[0]**2 + Chi_polar[1]**2)
-        # print("Chi_polar_mag:", Chi_polar_mag)
-        C1, C2, C3, C4, C5, chi_convective_acceleration = self.chi_convective_acceleration(chi_test, cyl.circulation)
-        # print("convective_acceleration        : ", chi_convective_acceleration)
-        convective_acceleration_squared = self.convective_acceleration_squared(chi_test, cyl.circulation)
-        # print("convective_acceleration_squared: ", convective_acceleration_squared)
-        acceleration = self.chi_acceleration(chi_test, self.circulation)
-        # print("acceleration                   :", acceleration)
-        acceleration_squared = self.chi_acceleration_squared(chi_test, self.circulation)
-        # print("acceleration_squared           :", acceleration_squared)
-        # print("\n")
-        # compute numerical Appellian function
-        Gamma_range = [4.5,5, 0.01]
-        r_range = [self.cylinder_radius, 2*self.cylinder_radius, self.cylinder_radius]
-        theta_range = [0, 2*np.pi, np.pi/4]
-        step = 1e-12
-        Appellian_values, xi_eta_values = cyl.numerical_appellian(Gamma_range, r_range, theta_range, False, step)
-        # get numerical partials 
-        # numerical_convective_acceleration = self.numerical_convective_acceleration(chi_test, cyl.circulation, step)
-        # get analytical partials
-        r0, theta0 = hlp.xy_to_r_theta(self.zeta_center.real, self.zeta_center.imag)
-        r, theta = hlp.xy_to_r_theta(chi_test[0], chi_test[1])
-        # d_omega_r_dr, d_omega_r_dtheta, d_omega_theta_dr, d_omega_theta_dtheta = self.all_partials(r,theta,self.angle_of_attack, self.epsilon, self.cylinder_radius, r0, theta0, Gamma)
-        if self.show_fig:
-            for i in range(len(xi_eta_values)):
-                plt.plot(xi_eta_values[i][0], xi_eta_values[i][1], color='red')
+    def velocity_chi(self, point_xy_in_Chi_plane, Gamma):
+        """Start with a Chi value that is shifted from zeta_center"""
+        xi, eta = point_xy_in_Chi_plane[0], point_xy_in_Chi_plane[1]
+        r, theta = hlp.xy_to_r_theta(xi, eta)
+        zeta_center = self.zeta_center
+        xio, etao = zeta_center.real, zeta_center.imag
+        r0, theta0 = hlp.xy_to_r_theta(xio, etao)
+        V_inf, R, alpha, epsilon = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.epsilon
+        G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
+        V_real = (Gamma/(2*np.pi))*((G1*G5+G2*G6)/(G5**2 + G6**2)) + V_inf*((G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
+        V_imag = (-1*Gamma/(2*np.pi))*((G2*G5-G1*G6)/(G5**2 + G6**2)) + V_inf*((G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
+        velocity_complex = np.array([V_real, V_imag])
+        return velocity_complex
 
-        return Appellian_values, xi_eta_values
+    def calc_Chi_G_values(self, r, theta, alpha, epsilon, R, r0, theta0):
+        """takes in r, theta, alpha, epsilon, R, r0, theta0 and calculates the G values"""
+        G1 = np.sin(theta)/r
+        G2 = np.cos(theta)/r
+        G3 = R**2*np.cos(alpha-2*theta)/r**2
+        G4 = R**2*np.sin(alpha-2*theta)/r**2
+        G5 = 1 - ((R-epsilon)**2*(r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2)
+        G6 = ((R-epsilon)**2*(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2)
+        return G1, G2, G3, G4, G5, G6
+    
+    def calc_z_G_values(self, r, theta, alpha, epsilon, R, r_0, theta_0):
+        """takes in r, theta, alpha, epsilon, R, r0, theta0 and calculates the G values"""
+        G1 = (r*np.sin(theta) - r_0*np.sin(theta_0))/(r**2 + r_0**2 - 2*r*r_0*np.cos(theta - theta_0))
+        G2 = (r*np.cos(theta) - r_0*np.cos(theta_0))/(r**2 + r_0**2 - 2*r*r_0*np.cos(theta - theta_0))
+        G3 = (R**2*(np.cos(alpha)*((r*np.cos(theta)-r_0*np.cos(theta_0))**2-(r*np.sin(theta)-r_0*np.sin(theta_0))**2)+2*np.sin(alpha)*((r*np.cos(theta)-r_0*np.cos(theta_0))*(r*np.sin(theta)-r_0*np.sin(theta_0)))))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2+(2*(r*np.cos(theta)-r_0*np.cos(theta_0))*(r*np.sin(theta)-r_0*np.sin(theta_0)))**2)
+        G4 = (R**2*(np.sin(alpha)*((r*np.cos(theta)-r_0*np.cos(theta_0))**2-(r*np.sin(theta)-r_0*np.sin(theta_0))**2)-2*np.cos(alpha)*((r*np.cos(theta)-r_0*np.cos(theta_0))*(r*np.sin(theta)-r_0*np.sin(theta_0)))))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2+(2*(r*np.cos(theta)-r_0*np.cos(theta_0))*(r*np.sin(theta)-r_0*np.sin(theta_0)))**2)
+        G5 = 1 - (np.cos(2*theta)*(R - epsilon)**2)/r**2
+        G6 = (np.sin(2*theta)*(R - epsilon)**2)/r**2
+        return G1, G2, G3, G4, G5, G6
+    
+    def partial_coefficients_of_omega_r_wrt_G_Chi(self, V_inf, theta, alpha, G1, G2, G3, G4, G5, G6):
+        """This function retrieves the partial derivatives of omega r with respect to G values"""
+        # G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
+        # omega r partials with respect to G1, G2, G3, G4, G5, G6
+        A_omega_rG = 1/(2*np.pi)*((G5*np.cos(theta))/(G5**2 + G6**2) + (G6*np.sin(theta))/(G5**2 + G6**2))
+        B_omega_rG = 1/(2*np.pi)*((G6*np.cos(theta))/(G5**2 + G6**2) - (G5*np.sin(theta))/(G5**2 + G6**2))
+        C_omega_rG = - V_inf*(G5*np.cos(theta)/(G5**2 + G6**2) + G6*np.sin(theta)/(G5**2 + G6**2))
+        D_omega_rG = V_inf*(G5*np.sin(theta)/(G5**2 + G6**2) - G6*np.cos(theta)/(G5**2 + G6**2))
+        E_omega_rG = (G1*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) - (G2*np.sin(theta))/(2*np.pi*(G5**2 + G6**2)) - (G5*np.cos(theta)*(G1*G5 + G2*G6))/(np.pi*(G5**2 + G6**2)**2) - (G5*np.sin(theta)*(G1*G6 - G2*G5))/(np.pi*(G5**2 + G6**2)**2)
+        F_omega_rG = V_inf*((np.sin(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)+(2*G5*np.cos(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2-(2*G5*np.sin(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2)
+        G_omega_rG = (G2*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) + (G1*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) - (G6*np.cos(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2) - (G6*np.sin(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2)
+        H_omega_rG = V_inf*((2*G6*np.cos(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2-(np.sin(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(2*G6*np.sin(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2)
+        return A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG
+    
+    def partial_coefficients_of_omega_r_wrt_G_z(self, V_inf, theta, alpha, G1, G2, G3, G4, G5, G6):
+        """This function retrieves the partial derivatives of omega r with respect to G values"""
+        A_omega_rG = 1/(2*np.pi)*((G5*np.cos(theta))/(G5**2 + G6**2) + (G6*np.sin(theta))/(G5**2 + G6**2))
+        B_omega_rG = 1/(2*np.pi)*((G6*np.cos(theta))/(G5**2 + G6**2) - (G5*np.sin(theta))/(G5**2 + G6**2))
+        C_omega_rG = - V_inf*(G5*np.cos(theta)/(G5**2 + G6**2) + G6*np.sin(theta)/(G5**2 + G6**2))
+        D_omega_rG = V_inf*(G5*np.sin(theta)/(G5**2 + G6**2) - G6*np.cos(theta)/(G5**2 + G6**2))
+        E_omega_rG = (G1*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) - (G2*np.sin(theta))/(2*np.pi*(G5**2 + G6**2)) - (G5*np.cos(theta)*(G1*G5 + G2*G6))/(np.pi*(G5**2 + G6**2)**2) - (G5*np.sin(theta)*(G1*G6 - G2*G5))/(np.pi*(G5**2 + G6**2)**2)
+        F_omega_rG = V_inf*((np.sin(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)+(2*G5*np.cos(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2-(2*G5*np.sin(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2)
+        G_omega_rG = (G2*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) + (G1*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) - (G6*np.cos(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2) - (G6*np.sin(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2)
+        H_omega_rG = V_inf*((2*G6*np.cos(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2-(np.sin(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(2*G6*np.sin(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2)
+        return A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG
 
+    def partial_coefficients_of_omega_theta_wrt_G_Chi(self, V_inf, theta, alpha, G1, G2, G3, G4, G5, G6):
+        """This function retrieves the partial derivatives of omega theta with respect to G values"""
+        A_omega_thetaG = 1/(2*np.pi)*((G6*np.cos(theta))/(G5**2 + G6**2) - (G5*np.sin(theta))/(G5**2 + G6**2))
+        B_omega_thetaG = 1/(2*np.pi)*(-(G5*np.cos(theta))/(G5**2 + G6**2) - (G6*np.sin(theta))/(G5**2 + G6**2))
+        C_omega_thetaG = V_inf*(G5*np.sin(theta)/(G5**2 + G6**2) - G6*np.cos(theta)/(G5**2 + G6**2))
+        D_omega_thetaG = V_inf*(G5*np.cos(theta)/(G5**2 + G6**2) + G6*np.sin(theta)/(G5**2 + G6**2))
+        E_omega_thetaG = -((G2*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) + (G1*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) + (G5*np.cos(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2) - (G5*np.sin(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2))
+        F_omega_thetaG = V_inf*((np.cos(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)+(np.sin(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(2*G5*np.cos(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2-(2*G5*np.sin(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2)
+        G_omega_thetaG = (G1*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) - (G2*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) - (G6*np.cos(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2) + (G6*np.sin(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2)
+        H_omega_thetaG = V_inf*((np.sin(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(2*G6*np.cos(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2-(2*G6*np.sin(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2)
+        return A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG
+    
+    def partial_coefficients_of_omega_theta_wrt_G_z(self, V_inf, theta, alpha, G1, G2, G3, G4, G5, G6):
+        """This function retrieves the partial derivatives of omega theta with respect to G values"""
+        A_omega_thetaG = 1/(2*np.pi)*((G6*np.cos(theta))/(G5**2 + G6**2) - (G5*np.sin(theta))/(G5**2 + G6**2))
+        B_omega_thetaG = 1/(2*np.pi)*(-(G5*np.cos(theta))/(G5**2 + G6**2) - (G6*np.sin(theta))/(G5**2 + G6**2))
+        C_omega_thetaG = V_inf*(G5*np.sin(theta)/(G5**2 + G6**2) - G6*np.cos(theta)/(G5**2 + G6**2))
+        D_omega_thetaG = V_inf*(G5*np.cos(theta)/(G5**2 + G6**2) + G6*np.sin(theta)/(G5**2 + G6**2))
+        E_omega_thetaG = -((G2*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) + (G1*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) + (G5*np.cos(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2) - (G5*np.sin(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2))
+        F_omega_thetaG = V_inf*((np.cos(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)+(np.sin(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(2*G5*np.cos(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2-(2*G5*np.sin(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2)
+        G_omega_thetaG = (G1*np.cos(theta))/(2*np.pi*(G5**2 + G6**2)) - (G2*np.sin(theta)/(2*np.pi*(G5**2+G6**2))) - (G6*np.cos(theta)*(G1*G6-G2*G5))/(np.pi*(G5**2+G6**2)**2) + (G6*np.sin(theta)*(G1*G5+G2*G6))/(np.pi*(G5**2+G6**2)**2)
+        H_omega_thetaG = V_inf*((np.sin(theta)*(G4+np.sin(alpha)))/(G5**2+G6**2)-(np.cos(theta)*(G3-np.cos(alpha)))/(G5**2+G6**2)-(2*G6*np.cos(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)-G3*G6+G4*G5))/(G5**2+G6**2)**2-(2*G6*np.sin(theta)*(G6*np.sin(alpha)-G5*np.cos(alpha)+G3*G5+G4*G6))/(G5**2+G6**2)**2)
+        return A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG
+    
+    def partial_coefficients_of_G_wrt_r_Chi(self, r, theta, alpha, epsilon, R, r0, theta0):
+        """This function retrieves the partial derivatives of G values with respect to r"""
+        AGr = -np.sin(theta)/r**2
+        BGr = -np.cos(theta)/r**2
+        CGr = (R**2*(r**2*np.cos(2*theta)*np.cos(alpha) + r**2*np.sin(2*theta)*np.sin(alpha))*(2*r**3*(np.cos(4*theta) - 1) - 4*r**3*np.cos(2*theta)**2))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)**2 - (R**2*(2*r*np.cos(2*theta)*np.cos(alpha) + 2*r*np.sin(2*theta)*np.sin(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)
+        DGr = (R**2*(r**2*np.cos(2*theta)*np.sin(alpha) - r**2*np.sin(2*theta)*np.cos(alpha))*(2*r**3*(np.cos(4*theta) - 1) - 4*r**3*np.cos(2*theta)**2))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)**2 - (R**2*(2*r*np.cos(2*theta)*np.sin(alpha) - 2*r*np.sin(2*theta)*np.cos(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)
+        EGr = ((R - epsilon)**2*(2*(2*r*np.cos(2*theta) + 2*r0*np.cos(theta + theta0))*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2) + 2*(2*r*np.sin(2*theta) + 2*r0*np.sin(theta + theta0))*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)**2 - ((R - epsilon)**2*(2*r*np.cos(2*theta) + 2*r0*np.cos(theta + theta0)))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)
+        FGr= ((2*r*np.sin(2*theta) + 2*r0*np.sin(theta + theta0))*(R - epsilon)**2)/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2) - ((R - epsilon)**2*(2*(2*r*np.cos(2*theta) + 2*r0*np.cos(theta + theta0))*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2) + 2*(2*r*np.sin(2*theta) + 2*r0*np.sin(theta + theta0))*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)**2
+        return AGr, BGr, CGr, DGr, EGr, FGr
+    
+    def partial_coefficients_of_G_wrt_r_z(self, r, theta, alpha, epsilon, R, r_0, theta_0):
+        """"""
+        AGr = (r_0**2*np.sin(theta - 2*theta_0) - r**2*np.sin(theta) + 2*r*r_0*np.sin(theta_0))/(r**2 + r_0**2 - 2*r*r_0*np.cos(theta - theta_0))**2
+        BGr = -(r**2*np.cos(theta) + r_0**2*np.cos(theta - 2*theta_0) - 2*r*r_0*np.cos(theta_0))/(r**2 + r_0**2 - 2*r*r_0*np.cos(theta - theta_0))**2
+        CGr = - (R**2*(2*r_0*np.cos(theta - alpha + theta_0) - 2*r*np.cos(alpha - 2*theta)))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2 + 4*(r*np.cos(theta) - r_0*np.cos(theta_0))**2*(r*np.sin(theta) - r_0*np.sin(theta_0))**2) - (R**2*(np.cos(alpha)*((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2) + 2*np.sin(alpha)*(r*np.cos(theta) - r_0*np.cos(theta_0))*(r*np.sin(theta) - r_0*np.sin(theta_0)))*(8*r*r_0**2 - 4*r_0**3*np.cos(theta - theta_0) + 4*r**3 + 4*r*r_0**2*np.cos(2*theta - 2*theta_0) - 12*r**2*r_0*np.cos(theta - theta_0)))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2 + 4*(r*np.cos(theta) - r_0*np.cos(theta_0))**2*(r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2
+        DGr = (R**2*(2*r_0*np.sin(theta - alpha + theta_0) + 2*r*np.sin(alpha - 2*theta)))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2 + 4*(r*np.cos(theta) - r_0*np.cos(theta_0))**2*(r*np.sin(theta) - r_0*np.sin(theta_0))**2) - (R**2*(np.sin(alpha)*((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2) - 2*np.cos(alpha)*(r*np.cos(theta) - r_0*np.cos(theta_0))*(r*np.sin(theta) - r_0*np.sin(theta_0)))*(8*r*r_0**2 - 4*r_0**3*np.cos(theta - theta_0) + 4*r**3 + 4*r*r_0**2*np.cos(2*theta - 2*theta_0) - 12*r**2*r_0*np.cos(theta - theta_0)))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2 + 4*(r*np.cos(theta) - r_0*np.cos(theta_0))**2*(r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2
+        EGr = (2*np.cos(2*theta)*(R - epsilon)**2)/r**3
+        FGr = -(2*np.sin(2*theta)*(R - epsilon)**2)/r**3
+        return AGr, BGr, CGr, DGr, EGr, FGr
+
+    def partial_coefficients_of_G_wrt_theta_Chi(self, r, theta, alpha, epsilon, R, r0, theta0):
+        AGtheta = np.cos(theta)/r
+        BGtheta  = -np.sin(theta)/r
+        CGtheta = -(R**2*(2*r**2*np.cos(2*theta)*np.sin(alpha) - 2*r**2*np.sin(2*theta)*np.cos(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2) - (R**2*(2*r**4*np.sin(4*theta) - 4*r**4*np.cos(2*theta)*np.sin(2*theta))*(r**2*np.cos(2*theta)*np.cos(alpha) + r**2*np.sin(2*theta)*np.sin(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)**2
+        DGtheta = (R**2*(2*r**2*np.cos(2*theta)*np.cos(alpha) + 2*r**2*np.sin(2*theta)*np.sin(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2) - (R**2*(2*r**4*np.sin(4*theta) - 4*r**4*np.cos(2*theta)*np.sin(2*theta))*(r**2*np.cos(2*theta)*np.sin(alpha) - r**2*np.sin(2*theta)*np.cos(alpha)))/((r**4*(np.cos(4*theta) - 1))/2 - r**4*np.cos(2*theta)**2)**2
+        EGtheta = ((R - epsilon)**2*(2*np.sin(2*theta)*r**2 + 2*r0*np.sin(theta + theta0)*r))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2) - ((2*(2*np.sin(2*theta)*r**2 + 2*r0*np.sin(theta + theta0)*r)*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2) - 2*(2*np.cos(2*theta)*r**2 + 2*r0*np.cos(theta + theta0)*r)*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))*(R - epsilon)**2*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)**2
+        FGtheta = ((R - epsilon)**2*(2*np.cos(2*theta)*r**2 + 2*r0*np.cos(theta + theta0)*r))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2) + ((2*(2*np.sin(2*theta)*r**2 + 2*r0*np.sin(theta + theta0)*r)*(np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2) - 2*(2*np.cos(2*theta)*r**2 + 2*r0*np.cos(theta + theta0)*r)*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))*(R - epsilon)**2*(np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2))/((np.cos(2*theta)*r**2 + 2*np.cos(theta + theta0)*r*r0 + np.cos(2*theta0)*r0**2)**2 + (np.sin(2*theta)*r**2 + 2*np.sin(theta + theta0)*r*r0 + np.sin(2*theta0)*r0**2)**2)**2
+        return AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta
+    
+    def partial_coefficients_of_G_wrt_theta_z(self, r, theta, alpha, epsilon, R, r_0, theta_0):
+        """"""
+        AGtheta = (r*(r**2*np.cos(theta) + r_0**2*np.cos(theta - 2*theta_0) - 2*r*r_0*np.cos(theta_0)))/(r**2 + r_0**2 - 2*r*r_0*np.cos(theta - theta_0))**2
+        BGtheta = (r*(r_0**2*np.sin(theta - 2*theta_0) - r**2*np.sin(theta) + 2*r*r_0*np.sin(theta_0)))/(r**2 + r_0**2 - 2*r*r_0*np.cos(theta - theta_0))**2
+        CGtheta = (2*R**2*r*(r_0*np.sin(theta - alpha + theta_0) + r*np.sin(alpha - 2*theta)))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2 + 4*(r*np.cos(theta) - r_0*np.cos(theta_0))**2*(r*np.sin(theta) - r_0*np.sin(theta_0))**2) - (4*R**2*r*r_0*(np.cos(alpha)*((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2) + 2*np.sin(alpha)*(r*np.cos(theta) - r_0*np.cos(theta_0))*(r*np.sin(theta) - r_0*np.sin(theta_0)))*(r**2*np.sin(theta - theta_0) + r_0**2*np.sin(theta - theta_0) - r*r_0*np.sin(2*theta - 2*theta_0)))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2 + 4*(r*np.cos(theta) - r_0*np.cos(theta_0))**2*(r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2
+        DGtheta = (2*R**2*r*(r_0*np.cos(theta - alpha + theta_0) - r*np.cos(alpha - 2*theta)))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2 + 4*(r*np.cos(theta) - r_0*np.cos(theta_0))**2*(r*np.sin(theta) - r_0*np.sin(theta_0))**2) - (4*R**2*r*r_0*(np.sin(alpha)*((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2) - 2*np.cos(alpha)*(r*np.cos(theta) - r_0*np.cos(theta_0))*(r*np.sin(theta) - r_0*np.sin(theta_0)))*(r**2*np.sin(theta - theta_0) + r_0**2*np.sin(theta - theta_0) - r*r_0*np.sin(2*theta - 2*theta_0)))/(((r*np.cos(theta) - r_0*np.cos(theta_0))**2 - (r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2 + 4*(r*np.cos(theta) - r_0*np.cos(theta_0))**2*(r*np.sin(theta) - r_0*np.sin(theta_0))**2)**2
+        EGtheta = (2*np.sin(2*theta)*(R - epsilon)**2)/r**2
+        FGtheta = (2*np.cos(2*theta)*(R - epsilon)**2)/r**2
+        return AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta
+    
+    def calc_A1_through_A12(self,  V_inf, theta, alpha, G1, G2, G3, G4, G5, G6, A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG, A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG, AGr, BGr, CGr, DGr, EGr, FGr, AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta):
+        """This function calculates the A1 through A12 values"""
+        A1 = 1/(2*np.pi)*(np.cos(theta)*(G1*G5+G2*G6)/(G5**2 + G6**2) - np.sin(theta)*(G2*G5-G1*G6)/(G5**2 + G6**2))
+        A2 = V_inf*(np.cos(theta)*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2) + np.sin(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
+        A3 = 1/(2*np.pi)*(-np.cos(theta)*(G2*G5-G1*G6)/(G5**2 + G6**2) - np.sin(theta)*(G1*G5+G2*G6)/(G5**2 + G6**2))
+        A4 = V_inf*(np.cos(theta)*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2) - np.sin(theta)*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
+        A5 = A_omega_rG*AGr + B_omega_rG*BGr + E_omega_rG*EGr + G_omega_rG*FGr
+        A6 = C_omega_rG*CGr + D_omega_rG*DGr + F_omega_rG*EGr + H_omega_rG*FGr
+        A7 = A_omega_rG*AGtheta + B_omega_rG*BGtheta + E_omega_rG*EGtheta + G_omega_rG*FGtheta
+        A8 = C_omega_rG*CGtheta + D_omega_rG*DGtheta + F_omega_rG*EGtheta + H_omega_rG*FGtheta
+        A9 = A_omega_thetaG*AGtheta + B_omega_thetaG*BGtheta + E_omega_thetaG*EGtheta + G_omega_thetaG*FGtheta
+        A10 = C_omega_thetaG*CGtheta + D_omega_thetaG*DGtheta + F_omega_thetaG*EGtheta + H_omega_thetaG*FGtheta
+        A11 = A_omega_thetaG*AGr + B_omega_thetaG*BGr + E_omega_thetaG*EGr + G_omega_thetaG*FGr
+        A12 = C_omega_thetaG*CGr + D_omega_thetaG*DGr + F_omega_thetaG*EGr + H_omega_thetaG*FGr
+        return A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12
+
+    def chi_partial_derivatives(self, Gamma, A5, A6, A7, A8, A9, A10, A11, A12):
+        """This function retrieves the values of the partial derivatives of omega r and omega theta with respect to r and theta"""
+        partial_omega_r_wrt_r = Gamma*A5 + A6
+        partial_omega_r_wrt_theta = Gamma*A7 + A8
+        partial_omega_theta_wrt_theta = Gamma*A9 + A10
+        partial_omega_theta_wrt_r = Gamma*A11 + A12
+        return partial_omega_r_wrt_r, partial_omega_r_wrt_theta, partial_omega_theta_wrt_theta, partial_omega_theta_wrt_r
+    
+    def calc_B1_through_B6(self, r, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12):
+        """This function calculates the B1 through B6 values"""
+        B1 = A1*A5 + (1/r)*(A3*(A7-A3))
+        B2 = A1*A6 + A2*A5 + (1/r)*(A3*A8 + A4*(A7-2*A3))
+        B3 = A2*A6 + (1/r)*(A4*(A8-A4))
+        B4 = A1*A11 + (1/r)*(A3*(A9+A1))
+        B5 = A1*A12 + A2*A11 + (1/r)*(A3*(A10+A2) + A4*(A9+A1))
+        B6 = A2*A12 + (1/r)*(A4*(A10+A2))
+        return B1, B2, B3, B4, B5, B6
+    
+    def calc_C1_through_C5(self, B1, B2, B3, B4, B5, B6):
+        """This function calculates the C1 through C5 values"""
+        C1 = B1**2 + B4**2
+        C2 = 2*(B1*B2 + B4*B5)
+        C3 = 2*(B1*B3 + B4*B6) + B2**2 + B5**2
+        C4 = 2*(B2*B3 + B5*B6)
+        C5 = B3**2 + B6**2
+        return C1, C2, C3, C4, C5
+    
+    def chi_convective_acceleration(self, point_xy_in_Chi_plane, Gamma):
+        """Start with a Chi value that is shifted from zeta_center"""
+        xi, eta = point_xy_in_Chi_plane[0], point_xy_in_Chi_plane[1]
+        # xi, eta = point_xy_in_zeta_plane[0], point_xy_in_zeta_plane[1]
+        r, theta = hlp.xy_to_r_theta(xi, eta)
+        xio, etao = self.zeta_center.real, self.zeta_center.imag
+        r0, theta0 = hlp.xy_to_r_theta(xio, etao)
+        V_inf, R, alpha, epsilon = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.epsilon
+        # omega_chi_unsplit = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(xi+1j*eta)) - np.exp(1j*alpha)*R**2/(xi+1j*eta)**2) / (1 - (R-epsilon)**2/(xi+xio+1j*(eta+etao))**2)
+        G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
+        # velocity_r = np.cos(theta)*Gamma/(2*np.pi)*(G1*G5+G2*G6)/(G5**2 + G6**2)+np.cos(theta)*V_inf*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2) - np.sin(theta)*Gamma/(2*np.pi)*(G2*G5-G1*G6)/(G5**2 + G6**2) + np.sin(theta)*V_inf*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2)
+        # velocity_theta = np.cos(theta)*V_inf*(G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2) - np.cos(theta)*Gamma/(2*np.pi)*(G2*G5-G1*G6)/(G5**2 + G6**2) - np.sin(theta)*Gamma/(2*np.pi)*(G1*G5+G2*G6)/(G5**2 + G6**2) - np.sin(theta)*V_inf*(G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2)
+        A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG = self.partial_coefficients_of_omega_r_wrt_G_Chi(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6)
+        A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG = self.partial_coefficients_of_omega_theta_wrt_G_Chi(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6)
+        AGr, BGr, CGr, DGr, EGr, FGr = self.partial_coefficients_of_G_wrt_r_Chi(r, theta, alpha, epsilon, R, r0, theta0)
+        AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta = self.partial_coefficients_of_G_wrt_theta_Chi(r, theta, alpha, epsilon, R, r0, theta0)
+        # calculate the A1 through A12 values
+        A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12 = self.calc_A1_through_A12(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6, A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG, A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG, AGr, BGr, CGr, DGr, EGr, FGr, AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta)
+        # omega_r, omega_theta = Gamma*A1 + A2, Gamma*A3 + A4
+        # partial_omega_r_wrt_r, partial_omega_r_wrt_theta, partial_omega_theta_wrt_theta, partial_omega_theta_wrt_r = self.chi_partial_derivatives(Gamma, A5, A6, A7, A8, A9, A10, A11, A12)
+        B1, B2, B3, B4, B5, B6 = self.calc_B1_through_B6(r, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12)
+        convective_acceleration = np.array([Gamma**2*B1 + Gamma*B2 + B3, Gamma**2*B4 + Gamma*B5 + B6])
+        C1, C2, C3, C4, C5 = self.calc_C1_through_C5(B1, B2, B3, B4, B5, B6)
+        return convective_acceleration
+    
+    def z_convective_acceleration(self, point_xy_in_z_plane, Gamma):
+        """Start with a z value that is shifted from z_center"""
+        z = point_xy_in_z_plane[0] + 1j*point_xy_in_z_plane[1]
+        zeta = self.z_to_zeta(z, self.epsilon)
+        r, theta = hlp.xy_to_r_theta(zeta.real, zeta.imag)
+        xio, etao = self.zeta_center.real, self.zeta_center.imag
+        r0, theta0 = hlp.xy_to_r_theta(xio, etao)
+        V_inf, R, alpha, epsilon = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.epsilon
+        G1, G2, G3, G4, G5, G6 = self.calc_z_G_values(r, theta, alpha, epsilon, R, r0, theta0)
+        A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG = self.partial_coefficients_of_omega_r_wrt_G_z(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6)
+        A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG = self.partial_coefficients_of_omega_theta_wrt_G_z(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6)
+        AGr, BGr, CGr, DGr, EGr, FGr = self.partial_coefficients_of_G_wrt_r_z(r, theta, alpha, epsilon, R, r0, theta0)
+        AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta = self.partial_coefficients_of_G_wrt_theta_z(r, theta, alpha, epsilon, R, r0, theta0)
+        # calculate the A1 through A12 values
+        A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12 = self.calc_A1_through_A12(V_inf, theta, alpha, G1, G2, G3, G4, G5, G6, A_omega_rG, B_omega_rG, C_omega_rG, D_omega_rG, E_omega_rG, F_omega_rG, G_omega_rG, H_omega_rG, A_omega_thetaG, B_omega_thetaG, C_omega_thetaG, D_omega_thetaG, E_omega_thetaG, F_omega_thetaG, G_omega_thetaG, H_omega_thetaG, AGr, BGr, CGr, DGr, EGr, FGr, AGtheta, BGtheta, CGtheta, DGtheta, EGtheta, FGtheta)
+        B1, B2, B3, B4, B5, B6 = self.calc_B1_through_B6(r, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12)
+        convective_acceleration = np.array([Gamma**2*B1 + Gamma*B2 + B3, Gamma**2*B4 + Gamma*B5 + B6])
+        C1, C2, C3, C4, C5 = self.calc_C1_through_C5(B1, B2, B3, B4, B5, B6)
+        return convective_acceleration
+    
+
+    
 if __name__ == "__main__":
-    # initialize the cylinder object
+    ## initialize the cylinder object
     plt.rcParams["font.family"] = "Serif"
     plt.rcParams["font.size"] = 17.0
     plt.rcParams["axes.labelsize"] = 17.0
@@ -753,7 +836,7 @@ if __name__ == "__main__":
     plt.rcParams["xtick.minor.size"] = plt.rcParams["ytick.minor.size"] = 2.5
     plt.rcParams["mathtext.fontset"] = "dejavuserif"
     plt.rcParams['figure.dpi'] = 300.0
-    # change legend parameters
+    ## change legend parameters
     plt.rcParams["legend.fontsize"] = 17.0
     plt.rcParams["legend.frameon"] = True
     subdict = {
@@ -762,15 +845,56 @@ if __name__ == "__main__":
         "sharex" : True
     }
     cyl = cylinder("Joukowski_Cylinder.json")
-    if cyl.is_test_appellian:
-        test = cyl.test_appellian_stuff()
+    print("\n")
+    if cyl.is_appellian and cyl.type == "cylinder":
+        Gamma_range = [-1, 5, 0.1]
+        r_range = [cyl.cylinder_radius, cyl.cylinder_radius, cyl.cylinder_radius]
+        # r_range = [1.0001*cyl.cylinder_radius, 1.0002*cyl.cylinder_radius, 0.0001*cyl.cylinder_radius]
+        theta_range = [0, 2*np.pi, np.pi/16]
 
+        appellian_array, xi_eta_vals = cyl.numerically_integrate_appellian(Gamma_range, r_range, theta_range, cyl.is_analytic_accel)
+        # appellian_array, xi_eta_vals = cyl.numerically_dbquad_integrate_appellian(Gamma_range, r_range, theta_range, cyl.is_analytic_accel), np.array([0, 0])
+        if cyl.is_plot_appellian:
+            plt.plot(appellian_array[:,0], appellian_array[:,1])
+            plt.xlabel("$\\Gamma$")
+            plt.ylabel("S")
+            plt.title("Appellian Function")
+            plt.show()
+        # fit a polynomial to the Appellian function
+        appellian_polynomial = np.polyfit(appellian_array[:,0], appellian_array[:,1], cyl.polynomial_order)
+        print("Appellian polynomial coefficients: \n", appellian_polynomial)
+        # find the derivative of the polynomial with respect to Gamma
+        appellian_derivative = np.polyder(appellian_polynomial) # polyder takes in the coefficients of a polynomial and returns the coefficients of the derivative
+        # find the roots of the derivative of the polynomial
+        appellian_roots = np.roots(appellian_derivative) # np.roots takes in the coefficients of a polynomial and returns the roots
+        print("Gamma values where the Appellian function has extremum: ", appellian_roots)
+        # determine if the extrema are maxima or minima using the second derivative test
+        for root in appellian_roots:
+            second_derivative = np.polyder(appellian_derivative)
+            second_derivative_value = np.polyval(second_derivative, root)
+            if second_derivative_value > 0:
+                print("Gamma value: ", root, " is a local minimum")
+            else:
+                print("Gamma value: ", root, " is a local maximum")
+        # plug roots into the appellian polynomial and determine the global extrema of the Appellian function
+        appellian_extrema = np.polyval(appellian_polynomial, appellian_roots) # np.polyval takes in the coefficients of a polynomial and the roots and returns the values of the polynomial at the roots
+        print("extrema values: ", appellian_extrema)
+        # if the first root is the smallest, print the root and the value of the Appellian function at that root
+        if np.min(appellian_extrema) == appellian_extrema[0]:
+            print("Global minimum of the Appellian function: " + str(appellian_extrema[0]) + " at the point " + str(appellian_roots[0]))
+        # if the second root is the smallest, print the root and the value of the Appellian function at that root
+        elif np.min(appellian_extrema) == appellian_extrema[1]:
+            print("Global minimum of the Appellian function: " + str(appellian_extrema[1]) + " at the point " + str(appellian_roots[1]))
+        elif np.min(appellian_extrema) == appellian_extrema[2]:
+            print("Global minimum of the Appellian function: " + str(appellian_extrema[2]) + " at the point " + str(appellian_roots[2]))
+    
+    
     plt.figure()
     cyl.get_full_geometry_zeta()
     cyl.plot_geometry_zeta()
     cyl.get_full_geometry()
     cyl.plot_geometry()
-    cyl.get_and_plot_foci()
+    zeta_trailing_edge_focus, zeta_leading_edge_focus, z_leading_edge_focus, z_trailing_edge_focus = cyl.get_and_plot_foci()
     # zeta_to_z_test_point = 1 + 1j
     if cyl.type == "airfoil":
         lift = cyl.calc_J_airfoil_CL()
@@ -795,11 +919,15 @@ if __name__ == "__main__":
     plt.ylabel("$\\eta$/$R$")
     plt.gca().xaxis.labelpad = 0.001
     plt.gca().yaxis.labelpad = -10
-    plt.xlim(-cyl.original_cylinder_radius, cyl.original_cylinder_radius)
-    plt.ylim(-cyl.original_cylinder_radius, cyl.original_cylinder_radius)
-    plt.xticks(np.linspace(-1, 2, 4))  # 4 points: -1, 0, 1, 2
-    plt.yticks(np.linspace(-1, 2, 4)) # the -1 is the bottom most point, and 2.0 is the top most point and the 1.0 is the increment.
-    plt.text(-0.07, -0.01, str(int(-cyl.original_cylinder_radius)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
+    plt.xlim(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim)
+    plt.ylim(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim)
+    x_tick_length = int(cyl.plot_x_upper_lim - cyl.plot_x_lower_lim)
+    y_tick_length = int(cyl.plot_x_upper_lim - cyl.plot_x_lower_lim)
+    x_ticks = np.linspace(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
+    y_ticks = np.linspace(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
+    plt.xticks(x_ticks)
+    plt.yticks(y_ticks) 
+    plt.text(-0.07, -0.01, str(int(cyl.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
     epsilon_name = "epsilon_" + str(cyl.epsilon)
     zeta_0_name = "zeta_0_" + str(cyl.zeta_center)
     if cyl.plot_text:
@@ -809,6 +937,55 @@ if __name__ == "__main__":
     if cyl.save_fig:
         plt.savefig("Joukowski_Cylinder_" + epsilon_name + "_" +  zeta_0_name + "_" + ".svg")
     if cyl.show_fig:
+        if cyl.type == "cylinder" and cyl.is_appellian and cyl.is_plot_appellian:
+            plt.scatter(xi_eta_vals[:, 0], xi_eta_vals[:, 1], color='red', s=5)
         plt.show()
+    print("\n")
+
+    
+
+    # plt.figure()
+    # parse the text files and plot the results
+    # D_000 = np.loadtxt("combined_upper_lower_coords_at_D_is_0.0_and_zeta0_is_(-0.25+0j).txt")
+    # D_001 = np.loadtxt("combined_upper_lower_coords_at_D_is_0.01_and_zeta0_is_(-0.25+0j).txt")
+    # D_005 = np.loadtxt("combined_upper_lower_coords_at_D_is_0.05_and_zeta0_is_(-0.25+0j).txt")
+    # D_05 = np.loadtxt("combined_upper_lower_coords_at_D_is_0.5_and_zeta0_is_(-0.25+0j).txt")
+    # D_1 = np.loadtxt("combined_upper_lower_coords_at_D_is_1.0_and_zeta0_is_(-0.25+0j).txt") 
+    # # Remove the middle point of D_000 through D_1
+    # D_000 = hlp.remove_middle_element(D_000)
+    # D_001 = hlp.remove_middle_element(D_001)
+    # D_005 = hlp.remove_middle_element(D_005)
+    # D_05 = hlp.remove_middle_element(D_05)
+    # D_1 = hlp.remove_middle_element(D_1)
+
+    # plt.plot(D_000[:,0], D_000[:,1], label="D = 0.0")
+    # plt.plot(D_001[:,0], D_001[:,1], label="D = 0.01")
+    # plt.plot(D_005[:,0], D_005[:,1], label="D = 0.05")
+    # plt.plot(D_05[:,0], D_05[:,1], label="D = 0.5")
+    # plt.plot(D_1[:,0], D_1[:,1], label="D = 1.0")
+
+    # plt.xlabel("$\\xi$/$R$")
+    # plt.ylabel("$\\eta$/$R$")
+    # plt.gca().set_aspect('equal', adjustable='box')
+    # plt.gca().xaxis.labelpad = 0.001
+    # plt.gca().yaxis.labelpad = -10
+    # plt.xlim(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim)
+    # plt.ylim(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim)
+    # x_tick_length = int(cyl.plot_x_upper_lim - cyl.plot_x_lower_lim)
+    # y_tick_length = int(cyl.plot_x_upper_lim - cyl.plot_x_lower_lim)
+    # x_ticks = np.linspace(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
+    # y_ticks = np.linspace(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
+    # plt.xticks(x_ticks)
+    # plt.yticks(y_ticks) 
+    # plt.text(-0.07, -0.01, str(int(cyl.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
+    # # make the legend with an adjustable font and box size
+    # # plt.legend(fontsize=10, frameon=True, loc='upper right')
+    # # save figure as a .svg file
+    # if cyl.save_fig:
+    #     plt.savefig("Joukowski_Cylinder_" + epsilon_name + "_" +  zeta_0_name + "_" + "_combined_upper_lower_coords.svg")
+    # if cyl.show_fig:
+    #     plt.show()
+    # print("\n")
+    
 
 

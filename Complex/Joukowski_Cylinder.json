@@ -6,30 +6,45 @@
             "airfoil" : "joukowski airfoil (requires design C_L and design thickness", 
             "cylinder" : "joukowski cylinder (requires epsilon, zeta_0, and vortex_strength)"
         },
-        "epsilonx": 0.3,
-        "epsilon": 0.09309931903630622,
-        "zeta_0x": [-0.25,0.25],
-        "zeta_0": [-0.09237604307034011,0.03802668541707471],
+        "is_trailing_edge_sharpness_D" : true,
+        "trailing_edge_sharpness_D" : 0.01,
+        "trailing_edge_sharpness_options" : "float from 0.0 (Sharp) to 1.0 (Circular Cylinder)",
+        "epsilonx": 0.09309931903630622,
+        "epsilon": 0.3,
+        "zeta_0xx": [-0.25,0.0],
+        "zeta_0x": [-0.09237604307034011,0.03802668541707471],
+        "zeta_0": [-0.25,0.25],
         "design_CL": 0.261,
         "design_thickness": 0.12,
-        "output_points": 1000
+        "output_points": 2000
     },
     "operating": {
         "freestream_velocity": 10.0,
         "angle_of_attack[deg]": 0.0,
-        "vortex_strength": 4.778574221866082,
-        "is_test_appellian" : true
+        "vortex_strength": 4.778574221866082
+    },
+    "appellian": {
+        "compute_appellian" : false,
+        "is_analytic_accel" : false,
+        "is_pressure_gradient" : false,
+        "is_chi" : false,
+        "is_z" : true,
+        "step_size" : 1e-6,
+        "polynomial_order" : 4,
+        "is_plot_appellian" : true
     },
     "plot": {
-        "x_lower_limit": -6.0,
-        "x_upper_limit":  6.0,
-        "x_start":       -6.0,
+        "is_plot_D_sweep": true,
+        "D_sweep_values": [0.0, 0.01, 0.05, 0.5, 1.0],
+        "x_lower_limit": -4.0,
+        "x_upper_limit":  4.0,
+        "x_start":       -4.0,
         "delta_s": 0.01,
         "n_lines": 20,
         "delta_y": 0.4,
         "do_plot_streamlines": false,
         "plot_text": false,
-        "save_fig": false,
+        "save_fig": true,
         "show_fig": true
     }
 }
