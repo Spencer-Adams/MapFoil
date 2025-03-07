@@ -101,6 +101,66 @@ def remove_middle_element(arr):
     mid_idx = len(arr) // 2
     return np.delete(arr, mid_idx, axis=0)
 
+def numerical_derivative(func, x, r_values=np.array([0.0]), theta_values=np.array([0.0]), is_analytic_accel=False, h=1e-6):
+    """ Compute first derivative using central difference. """
+    f_plus = func(x + h, r_values, theta_values, is_analytic_accel)
+    f_minus = func(x - h, r_values, theta_values, is_analytic_accel)
+    # print(f"f_plus: {f_plus}, f_minus: {f_minus}")  # Debug print
+    return (f_plus - f_minus) / (2 * h)
+
+def numerical_second_derivative(func, x, r_values=np.array([0.0]), theta_values=np.array([0.0]), is_analytic_accel=False, h=1e-6):
+    """ Compute second derivative using central difference. """
+    f_plus = func(x + h, r_values, theta_values, is_analytic_accel)
+    f = func(x, r_values, theta_values, is_analytic_accel)
+    f_minus = func(x - h, r_values, theta_values, is_analytic_accel)
+    # print(f"f_plus: {f_plus}, f: {f}, f_minus: {f_minus}")  # Debug print
+    return (f_plus - 2 * f + f_minus) / (h**2)
+
+def newtons_method(func, x0, r_values=np.array([0.0]), theta_values=np.array([0.0]), is_analytic_accel=False, tol=1e-12, max_iter=1000):
+    """ Newton's method to find extrema of a function. """
+    x = x0
+    
+    for i in range(max_iter):
+        f_prime = numerical_derivative(func, x, r_values, theta_values, is_analytic_accel)
+        f_double_prime = numerical_second_derivative(func, x, r_values, theta_values, is_analytic_accel)
+        
+        if abs(f_double_prime) < 1e-12:
+            raise ValueError("Second derivative is too small — possible inflection point or flat region.")
+        
+        x_new = x - f_prime / f_double_prime
+        epsilon = abs(x_new - x)
+        # stop if epsilon is less than tolerance or if the previous x is the same as the new x out to 14 decimal places
+        if epsilon < tol:# or np.isclose(x, x_new, atol=1e-16):
+            if epsilon < tol:
+                print(f"Converged in {i+1} iterations.")
+                # print epsilon at convergence
+                print(f"epsilon = {epsilon:.16f}")
+            elif np.isclose(x, x_new, atol=1e-16):
+                print(f"Converged in {i+1} iterations because the previous iteration was the same as this one to 16 digits.")
+                print(f"epsilon = {epsilon:.16f}")
+            return x_new
+        
+        # print iteration, and epsilon compared to tol every 10 steps
+        if i % 5 == 0:
+            print(f"Iteration {i+1}: x = {x_new:.16f}, epsilon = {epsilon:.16f}")
+            # print(f"Iteration {i+1}: x = {x_new:.6f}")
+        
+        x = x_new
+    
+    raise ValueError("Newton's method did not converge.")
+
+def example_func(x, r_values, theta_values, is_analytic_accel):  # Fix argument order
+    return np.sin(x) + 0.1 * x**2
+
 if __name__ == "__main__":
-    # Define symbols
-    four = 4 # placeholder 
+    # Example usage
+    initial_guess = 2.0
+    xi_eta = 1.0
+    r_values = 1
+    theta_values = 1
+    is_analytic_accel = False
+    print("\n")
+    extremum = newtons_method(example_func, initial_guess, r_values, theta_values, is_analytic_accel)
+    print(f"Extremum at Gamma = {extremum:.6f}")
+    print("\n")
+

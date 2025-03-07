@@ -63,6 +63,8 @@ class cylinder(potential_flow_object):
                 if self.is_D:
                     self.epsilon = self.calc_epsilon_from_D(self.D)
                     print("epsilon from D = " + str(self.D) + " and zeta0 = " + str(self.zeta_center) + " is " + str(self.epsilon))
+                    self.kutta_circulation = self.calc_circulation_J_airfoil()
+                    print("Kutta circulation", self.kutta_circulation)
                 else:
                     self.epsilon = input["geometry"]["epsilon"]
                     D = self.calc_D_from_epsilon()
@@ -232,30 +234,30 @@ class cylinder(potential_flow_object):
         polar_acceleration = self.polar_vector(theta, acceleration_complex)
         return polar_acceleration
 
-    def pressure_gradient(self, point_xi_eta_in_z_plane, Gamma):
-        """This function calculates the pressure gradient at a given point in the flow field in the z plane"""
-        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
-        zeta = self.z_to_zeta(z, self.epsilon)
-        point_xi_eta_in_zeta_plane = [zeta.real, zeta.imag]
-        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
-        plus = (z + np.sqrt(z**2 - 4*(R-epsilon)**2))/2
-        minus = (z - np.sqrt(z**2 - 4*(R-epsilon)**2))/2
-        first = -2*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)-(R**2*np.exp(1j*alpha))/(zeta-zeta0)**2)
-        second = -1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)**2 + 2*R**2*np.exp(1j*alpha)/(zeta-zeta0)**3
-        third = np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0) - (R**2*np.exp(1j*alpha))/(zeta-zeta0)**2
-        fourth = (1 - ((R - epsilon)**2)/(zeta**2))
-        if zeta == plus:
-            fifth = (1+z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
-            sixth = (-2*(R - epsilon)**2)/(z**2 - 4*(R - epsilon)**2)**(3/2)
-        if zeta == minus:
-            fifth = (1-z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
-            sixth = (2*(R - epsilon)**2)/((z**2 - 4*(R - epsilon)**2)**(3/2))
-        pressure_gradient = first*(second*fifth + third*sixth) / fourth
-        pressure_gradient_complex = np.array([pressure_gradient.real, -pressure_gradient.imag])
-        theta = np.arctan2(point_xi_eta_in_z_plane[1], point_xi_eta_in_z_plane[0])
-        pressure_gradient_polar = self.polar_vector(theta, pressure_gradient_complex)
-        magnitude_pressure_gradient_complex = np.linalg.norm(pressure_gradient_complex)
-        return magnitude_pressure_gradient_complex
+    # def pressure_gradient(self, point_xi_eta_in_z_plane, Gamma):
+    #     """This function calculates the pressure gradient at a given point in the flow field in the z plane"""
+    #     z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
+    #     zeta = self.z_to_zeta(z, self.epsilon)
+    #     point_xi_eta_in_zeta_plane = [zeta.real, zeta.imag]
+    #     V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+    #     plus = (z + np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+    #     minus = (z - np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+    #     first = -2*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)-(R**2*np.exp(1j*alpha))/(zeta-zeta0)**2)
+    #     second = -1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)**2 + 2*R**2*np.exp(1j*alpha)/(zeta-zeta0)**3
+    #     third = np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0) - (R**2*np.exp(1j*alpha))/(zeta-zeta0)**2
+    #     fourth = (1 - ((R - epsilon)**2)/(zeta**2))
+    #     if zeta == plus:
+    #         fifth = (1+z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
+    #         sixth = (-2*(R - epsilon)**2)/(z**2 - 4*(R - epsilon)**2)**(3/2)
+    #     if zeta == minus:
+    #         fifth = (1-z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
+    #         sixth = (2*(R - epsilon)**2)/((z**2 - 4*(R - epsilon)**2)**(3/2))
+    #     pressure_gradient = first*(second*fifth + third*sixth) / fourth
+    #     pressure_gradient_complex = np.array([pressure_gradient.real, -pressure_gradient.imag])
+    #     theta = np.arctan2(point_xi_eta_in_z_plane[1], point_xi_eta_in_z_plane[0])
+    #     pressure_gradient_polar = self.polar_vector(theta, pressure_gradient_complex)
+    #     magnitude_pressure_gradient_complex = np.linalg.norm(pressure_gradient_complex)
+    #     return magnitude_pressure_gradient_complex
 
     def polar_vector(self, theta, cartesian_vector):
         """This function converts the cartesian velocity to polar velocity (can go from z, zeta, or chi plane to polar velocity)"""
@@ -315,27 +317,35 @@ class cylinder(potential_flow_object):
         omega_theta_plus_dtheta, omega_theta_minus_dtheta = self.polar_vector(theta, omega_xy_plus_theta)[1], self.polar_vector(theta, omega_xy_minus_theta)[1]
         return omega_r_plus_dr, omega_r_minus_dr, omega_r_plus_dtheta, omega_r_minus_dtheta, omega_theta_plus_dr, omega_theta_minus_dr, omega_theta_plus_dtheta, omega_theta_minus_dtheta
 
-    def appellian_acceleration_loop(self, Gamma_values: np.array, r_values: np.array, theta_values: np.array, dr: float, dtheta: float, is_Chi: bool, acceleration: callable):
+    def appellian_acceleration_loop(self, Gamma: float, r_values: np.array, theta_values: np.array, dr: float, dtheta: float, is_Chi: bool, acceleration: callable):
         """"""
-        index = 0
+        # print("Gamma", Gamma)
+        # print("r_values", r_values)
+        # print("theta_values", theta_values)
+        # print("dr", dr)
+        # print("dtheta", dtheta)
+        # print("is_Chi", is_Chi)
+        # print("acceleration", acceleration)
+
+        Gamma_values = np.array([Gamma])
+        # index = 0
         Appellian_value = 0.0
         Appellian_array = np.zeros((len(Gamma_values), 2))
         xi_eta_values = np.zeros((len(r_values)*len(theta_values), 2))
         if is_Chi:
-            for i in range(len(Gamma_values)):
                 for j in range(len(r_values)):
                     for k in range(len(theta_values)):
                         Chi_val = hlp.r_theta_to_xy(r_values[j], theta_values[k])[0] + 1j*hlp.r_theta_to_xy(r_values[j], theta_values[k])[1] # the r, theta point in the Chi plane is converted to a complex number
+                        # print("Chi_val", Chi_val)
                         area_element = r_values[j]*dr*dtheta
-                        convective_acceleration = acceleration([Chi_val.real, Chi_val.imag], Gamma_values[i])
+                        # print("area element", area_element)
+                        # print("\n")
+                        convective_acceleration = acceleration([Chi_val.real, Chi_val.imag], Gamma)
                         Appellian_value += np.dot(convective_acceleration, convective_acceleration)*area_element
-                        xi_eta_values[index] = [Chi_val.real, Chi_val.imag]
-                        index += 1
-                Appellian_array[i] = [Gamma_values[i], 0.5*Appellian_value]
-                Appellian_value = 0.0
-                index = 0
+                        # xi_eta_values[index] = [Chi_val.real, Chi_val.imag]
+                        # index += 1
+                Appellian_array[0] = [Gamma, 0.5*Appellian_value]
         else:
-            for i in range(len(Gamma_values)):
                 for j in range(len(r_values)):
                     for k in range(len(theta_values)):
                         Chi = hlp.r_theta_to_xy(r_values[j], theta_values[k])[0] + 1j*hlp.r_theta_to_xy(r_values[j], theta_values[k])[1] # the r, theta point in the Chi plane is converted to a complex number
@@ -343,21 +353,18 @@ class cylinder(potential_flow_object):
                         z = self.zeta_to_z(zeta, self.epsilon)
                         r_z = hlp.xy_to_r_theta(z.real, z.imag)[0]
                         area_element = r_z * dr * dtheta
-                        convective_acceleration = acceleration([z.real, z.imag], Gamma_values[i])
+                        convective_acceleration = acceleration([z.real, z.imag], Gamma)
                         Appellian_value += np.dot(convective_acceleration, convective_acceleration)*area_element
-                        xi_eta_values[index] = [z.real, z.imag]
-                        index += 1
-                Appellian_array[i] = [Gamma_values[i], 0.5*Appellian_value]
-                Appellian_value = 0.0
-                index = 0
-        return Appellian_array, xi_eta_values
+                        # index += 1
+                Appellian_array[0] = [Gamma, 0.5*Appellian_value]
+                # Appellian_value = 0.0
+                # index = 0
+        Appellian_array = 0.5*Appellian_value
+        return Appellian_array
         
-    def numerically_integrate_appellian(self, Gamma_range: list, r_range: list, theta_range: list, is_analytic_accel: bool):
+    def numerically_integrate_appellian(self, Gamma: float, r_values: np.array, theta_values: np.array, is_analytic_accel: bool):
         """This function calculates the Appellian function numerically requires evenly spaced ranges for Gamma, r, and theta in Chi"""
         # create a meshgrid of r and theta values, the first value in r_range is the lower bound the second value is the upper bound, the third value is the increment size
-        Gamma_values = hlp.list_to_range(Gamma_range)
-        r_values = hlp.list_to_range(r_range)
-        theta_values = hlp.list_to_range(theta_range)
         # calculate the area element 
         if len(r_values) == 1:
             dr = 1.0
@@ -376,23 +383,28 @@ class cylinder(potential_flow_object):
         dr, dtheta = hlp.xy_to_r_theta(d_xi_z, d_eta_z)
         n = len(r_values)*len(theta_values)
         if is_analytic_accel and self.is_chi:
-            print("ANALYTIC CONVECTIVE ACCELERATION IN CHI")
-            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr_original, dtheta_original, True, self.chi_convective_acceleration)
+            # print("ANALYTIC CONVECTIVE ACCELERATION IN CHI")
+            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr_original, dtheta_original, True, self.chi_convective_acceleration)
         elif is_analytic_accel and self.is_z:
-            print("ANALYTIC CONVECTIVE ACCELERATION IN Z")
-            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr, dtheta, False, self.z_convective_acceleration)
+            # print("ANALYTIC CONVECTIVE ACCELERATION IN Z")
+            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr, dtheta, False, self.z_convective_acceleration)
         elif is_analytic_accel and self.is_pressure_gradient: 
-            print("ANALYTIC PRESSURE GRADIENT")
-            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr, dtheta, False, self.pressure_gradient)
+            # print("ANALYTIC PRESSURE GRADIENT")
+            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr, dtheta, False, self.pressure_gradient)
         elif not is_analytic_accel and self.is_z:
-            print("NUMERICAL CONVECTIVE ACCELERATION IN Z")
-            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr, dtheta, False, self.numerical_convective_acceleration)
+            # print("NUMERICAL CONVECTIVE ACCELERATION IN Z")
+            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr, dtheta, False, self.numerical_convective_acceleration)
         elif not is_analytic_accel and self.is_chi:
-            print("NUMERICAL CONVECTIVE ACCELERATION IN CHI")
-            Appellian_array, xi_eta_values = self.appellian_acceleration_loop(Gamma_values, r_values, theta_values, dr_original, dtheta_original, True, self.numerical_convective_acceleration)
+            # print("NUMERICAL CONVECTIVE ACCELERATION IN CHI")
+            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr_original, dtheta_original, True, self.numerical_convective_acceleration)
         else:
             raise ValueError("The function you are trying to use is not implemented")
-        return Appellian_array, xi_eta_values
+        # print("\n")
+        # print("\n")
+        # print("Appellian array", Appellian_array)
+        # print("\n")
+        # print("\n")
+        return Appellian_array
     
     
     def integrand(self, theta, r, is_Chi, acceleration, Gamma):
@@ -817,8 +829,61 @@ class cylinder(potential_flow_object):
         C1, C2, C3, C4, C5 = self.calc_C1_through_C5(B1, B2, B3, B4, B5, B6)
         return convective_acceleration
     
+    def run_appellian_roots(self):
+        """This function runs the Appellian stuff"""
+        if self.is_analytic_accel and self.is_chi:
+            print("ANALYTIC CONVECTIVE ACCELERATION IN CHI")
+        elif self.is_analytic_accel and self.is_z:
+            print("ANALYTIC CONVECTIVE ACCELERATION IN Z")
+        elif self.is_analytic_accel and self.is_pressure_gradient: 
+            print("ANALYTIC PRESSURE GRADIENT")
+        elif not self.is_analytic_accel and self.is_z:
+            print("NUMERICAL CONVECTIVE ACCELERATION IN Z")
+        elif not self.is_analytic_accel and self.is_chi:
+            print("NUMERICAL CONVECTIVE ACCELERATION IN CHI")
+        else:
+            raise ValueError("The function you are trying to use is not implemented")
+        r_range = [cyl.cylinder_radius, cyl.cylinder_radius, 0.05*cyl.cylinder_radius]
+        r_vals = hlp.list_to_range(r_range)
+        theta_range = [0, 2*np.pi, np.pi/128]
+        theta_vals = hlp.list_to_range(theta_range)
+        xi_eta_array = np.zeros((len(r_vals)*len(theta_vals), 2))
+        if self.is_chi:
+            for i in range(len(r_vals)):
+                for j in range(len(theta_vals)):
+                    xi_eta_array[i*len(theta_vals) + j] = hlp.r_theta_to_xy(r_vals[i], theta_vals[j]) # this populates the xi_eta_array with the xi and eta values corresponding to the r and theta values in the chi plane
+        else:
+            # convert r and theta values to z values by first converting them to xi and eta values in the chi plane, transforming them to zeta values, and then transforming them to z values
+            for i in range(len(r_vals)):
+                for j in range(len(theta_vals)):
+                    xi_eta_chi = hlp.r_theta_to_xy(r_vals[i], theta_vals[j])[0] + 1j*hlp.r_theta_to_xy(r_vals[i], theta_vals[j])[1]
+                    xi_eta_zeta = self.Chi_to_zeta(xi_eta_chi)
+                    xi_eta_z = self.zeta_to_z(xi_eta_zeta, self.epsilon)
+                    xi_eta_array[i*len(theta_vals) + j] = np.array([xi_eta_z.real, xi_eta_z.imag])
 
+        Gamma_start = self.kutta_circulation
+        appellian_root = hlp.newtons_method(self.numerically_dbquad_integrate_appellian, Gamma_start, r_values = r_vals, theta_values = theta_vals, is_analytic_accel=self.is_analytic_accel)
+        # print appellian root out to 8 decimal places
+        print("Appellian Root", appellian_root)
+        print("Appellian Root: ", round(appellian_root, 9))
+        return appellian_root, xi_eta_array
     
+    def pressure_gradient(self, point_xi_eta_in_z, Gamma):
+        """Takes in a point in the zeta plane and returns the pressure gradient"""
+        z = point_xi_eta_in_z[0] + 1j*point_xi_eta_in_z[1]
+        xi, eta = point_xi_eta_in_z[0], point_xi_eta_in_z[1]
+        zeta = self.z_to_zeta(z, self.epsilon)
+        point_xi_eta_in_zeta_plane = [zeta.real, zeta.imag]
+        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center      
+        first = (-2*(V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2) / (1 - (R-epsilon)**2/(zeta)**2)))/V_inf**2
+        second_d2 = ((V_inf*(-1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)**2 + (2*R**2*np.exp(1j*alpha))/(zeta-zeta0)**3))-(V_inf*(np.exp(-1j*alpha)+1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0) - (R**2*np.exp(1j*alpha))/(zeta-zeta0)**2))*(2*(R-epsilon)**2/zeta**3)/((1-(R-epsilon)**2/zeta**2)))/((1 - 2*(R-epsilon)**2/zeta**2+(R-epsilon)**4/zeta**4))
+        Dcp = first*second_d2
+        pressure_gradient_complex = np.array([Dcp.real, -Dcp.imag])
+        # theta = np.arctan2(point_xi_eta_in_z[1], point_xi_eta_in_z[0])
+        # pressure_gradient_polar = self.polar_vector(theta, pressure_gradient_complex)
+        magnitude_pressure_gradient_complex = np.linalg.norm(pressure_gradient_complex)
+        return magnitude_pressure_gradient_complex
+
 if __name__ == "__main__":
     ## initialize the cylinder object
     plt.rcParams["font.family"] = "Serif"
@@ -847,48 +912,8 @@ if __name__ == "__main__":
     cyl = cylinder("Joukowski_Cylinder.json")
     print("\n")
     if cyl.is_appellian and cyl.type == "cylinder":
-        Gamma_range = [-1, 5, 0.1]
-        r_range = [cyl.cylinder_radius, cyl.cylinder_radius, cyl.cylinder_radius]
-        # r_range = [1.0001*cyl.cylinder_radius, 1.0002*cyl.cylinder_radius, 0.0001*cyl.cylinder_radius]
-        theta_range = [0, 2*np.pi, np.pi/16]
-
-        appellian_array, xi_eta_vals = cyl.numerically_integrate_appellian(Gamma_range, r_range, theta_range, cyl.is_analytic_accel)
-        # appellian_array, xi_eta_vals = cyl.numerically_dbquad_integrate_appellian(Gamma_range, r_range, theta_range, cyl.is_analytic_accel), np.array([0, 0])
-        if cyl.is_plot_appellian:
-            plt.plot(appellian_array[:,0], appellian_array[:,1])
-            plt.xlabel("$\\Gamma$")
-            plt.ylabel("S")
-            plt.title("Appellian Function")
-            plt.show()
-        # fit a polynomial to the Appellian function
-        appellian_polynomial = np.polyfit(appellian_array[:,0], appellian_array[:,1], cyl.polynomial_order)
-        print("Appellian polynomial coefficients: \n", appellian_polynomial)
-        # find the derivative of the polynomial with respect to Gamma
-        appellian_derivative = np.polyder(appellian_polynomial) # polyder takes in the coefficients of a polynomial and returns the coefficients of the derivative
-        # find the roots of the derivative of the polynomial
-        appellian_roots = np.roots(appellian_derivative) # np.roots takes in the coefficients of a polynomial and returns the roots
-        print("Gamma values where the Appellian function has extremum: ", appellian_roots)
-        # determine if the extrema are maxima or minima using the second derivative test
-        for root in appellian_roots:
-            second_derivative = np.polyder(appellian_derivative)
-            second_derivative_value = np.polyval(second_derivative, root)
-            if second_derivative_value > 0:
-                print("Gamma value: ", root, " is a local minimum")
-            else:
-                print("Gamma value: ", root, " is a local maximum")
-        # plug roots into the appellian polynomial and determine the global extrema of the Appellian function
-        appellian_extrema = np.polyval(appellian_polynomial, appellian_roots) # np.polyval takes in the coefficients of a polynomial and the roots and returns the values of the polynomial at the roots
-        print("extrema values: ", appellian_extrema)
-        # if the first root is the smallest, print the root and the value of the Appellian function at that root
-        if np.min(appellian_extrema) == appellian_extrema[0]:
-            print("Global minimum of the Appellian function: " + str(appellian_extrema[0]) + " at the point " + str(appellian_roots[0]))
-        # if the second root is the smallest, print the root and the value of the Appellian function at that root
-        elif np.min(appellian_extrema) == appellian_extrema[1]:
-            print("Global minimum of the Appellian function: " + str(appellian_extrema[1]) + " at the point " + str(appellian_roots[1]))
-        elif np.min(appellian_extrema) == appellian_extrema[2]:
-            print("Global minimum of the Appellian function: " + str(appellian_extrema[2]) + " at the point " + str(appellian_roots[2]))
-    
-    
+        appellian_roots, xi_eta_vals = cyl.run_appellian_roots()
+        # appellian_roots, xi_eta_vals = cyl.run_appellian_stuff()
     plt.figure()
     cyl.get_full_geometry_zeta()
     cyl.plot_geometry_zeta()
@@ -934,58 +959,48 @@ if __name__ == "__main__":
         plt.text(0.05, 0.92, "$\\epsilon = $" + str(cyl.epsilon) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
         plt.text(0.60, 0.96, "$\\xi_0 = $" + str(cyl.zeta_center.real) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
         plt.text(0.60, 0.88, "$\\eta_0 = $" + str(cyl.zeta_center.imag) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-    if cyl.save_fig:
-        plt.savefig("Joukowski_Cylinder_" + epsilon_name + "_" +  zeta_0_name + "_" + ".svg")
     if cyl.show_fig:
         if cyl.type == "cylinder" and cyl.is_appellian and cyl.is_plot_appellian:
             plt.scatter(xi_eta_vals[:, 0], xi_eta_vals[:, 1], color='red', s=5)
+            if cyl.save_fig:
+                plt.savefig("Joukowski_Cylinder_" + epsilon_name + "_" +  zeta_0_name + "_" + ".svg")
         plt.show()
     print("\n")
 
+    # test_point_in_z = [-2.5, 2.5]
+    # pressure = cyl.pressure_gradient(test_point_in_z, cyl.circulation)
+    # print("Pressure Gradient at ", test_point_in_z, " is ", pressure)
+    # other_pressure = cyl.other_pressure_gradient(test_point_in_z, cyl.circulation)
+    # print("Pressure Gradient at ", test_point_in_z, " is ", other_pressure)
+
+
+    # D_range = [0, 1, 1]
+    # D_values = hlp.list_to_range(D_range)
+    # # make an array which contains zeros which is the length of D_values. The first column will be the D values and the second column will be the normalized gamma values
+    # normalized_gamma = np.zeros((len(D_values), 2))
+    # # Normalized_Gamma_wrt_D = np.zeros
+    # for i in tqdm(range(len(D_values)), desc="Calculating normalized Gamma wrt D"):
+    #     print("\nD VALUE", D_values[i])
+    #     cyl.epsilon = cyl.calc_epsilon_from_D(D_values[i])
+    #     appellian_roots, _ = cyl.run_appellian_stuff()
+    #     print("appellian roots: ", appellian_roots)
+    #     normalized_gamma[i, 0] = D_values[i]
+    #     normalized_gamma[i, 1] = appellian_roots/cyl.kutta_circulation
+    #     print("\n")
+    # plt.figure()
+    # plt.plot(normalized_gamma[:,0], normalized_gamma[:,1])
+    # plt.xlabel("$D$")
+    # plt.ylabel("$\\Gamma$/$\\Gamma_k$")
+    # # plt.xlim(0, 1.1)
+    # # plt.ylim(0, 1.1)
+    # plt.show()
+    # if cyl.save_fig:
+    #     plt.savefig("Normalized_Gamma_wrt_D_at_zeta0_is" +  str(cyl.zeta_center) + ".svg")
+
+
     
 
-    # plt.figure()
-    # parse the text files and plot the results
-    # D_000 = np.loadtxt("combined_upper_lower_coords_at_D_is_0.0_and_zeta0_is_(-0.25+0j).txt")
-    # D_001 = np.loadtxt("combined_upper_lower_coords_at_D_is_0.01_and_zeta0_is_(-0.25+0j).txt")
-    # D_005 = np.loadtxt("combined_upper_lower_coords_at_D_is_0.05_and_zeta0_is_(-0.25+0j).txt")
-    # D_05 = np.loadtxt("combined_upper_lower_coords_at_D_is_0.5_and_zeta0_is_(-0.25+0j).txt")
-    # D_1 = np.loadtxt("combined_upper_lower_coords_at_D_is_1.0_and_zeta0_is_(-0.25+0j).txt") 
-    # # Remove the middle point of D_000 through D_1
-    # D_000 = hlp.remove_middle_element(D_000)
-    # D_001 = hlp.remove_middle_element(D_001)
-    # D_005 = hlp.remove_middle_element(D_005)
-    # D_05 = hlp.remove_middle_element(D_05)
-    # D_1 = hlp.remove_middle_element(D_1)
 
-    # plt.plot(D_000[:,0], D_000[:,1], label="D = 0.0")
-    # plt.plot(D_001[:,0], D_001[:,1], label="D = 0.01")
-    # plt.plot(D_005[:,0], D_005[:,1], label="D = 0.05")
-    # plt.plot(D_05[:,0], D_05[:,1], label="D = 0.5")
-    # plt.plot(D_1[:,0], D_1[:,1], label="D = 1.0")
-
-    # plt.xlabel("$\\xi$/$R$")
-    # plt.ylabel("$\\eta$/$R$")
-    # plt.gca().set_aspect('equal', adjustable='box')
-    # plt.gca().xaxis.labelpad = 0.001
-    # plt.gca().yaxis.labelpad = -10
-    # plt.xlim(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim)
-    # plt.ylim(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim)
-    # x_tick_length = int(cyl.plot_x_upper_lim - cyl.plot_x_lower_lim)
-    # y_tick_length = int(cyl.plot_x_upper_lim - cyl.plot_x_lower_lim)
-    # x_ticks = np.linspace(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
-    # y_ticks = np.linspace(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
-    # plt.xticks(x_ticks)
-    # plt.yticks(y_ticks) 
-    # plt.text(-0.07, -0.01, str(int(cyl.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-    # # make the legend with an adjustable font and box size
-    # # plt.legend(fontsize=10, frameon=True, loc='upper right')
-    # # save figure as a .svg file
-    # if cyl.save_fig:
-    #     plt.savefig("Joukowski_Cylinder_" + epsilon_name + "_" +  zeta_0_name + "_" + "_combined_upper_lower_coords.svg")
-    # if cyl.show_fig:
-    #     plt.show()
-    # print("\n")
     
 
 
