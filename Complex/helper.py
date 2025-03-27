@@ -2,7 +2,8 @@ import numpy as np # type: ignore
 import math 
 import sympy # type: ignore
 from sympy import symbols, cos, sin, I, re, im, sqrt # type: ignore
-
+import time
+import threading
 # Helper functions below
 def vector_magnitude(vector: np.array): # Used to help A6 in the project. The streamlines need to be integrated forward using the unit velocity vector
     """
@@ -96,6 +97,15 @@ def central_difference(f_plus: float, f_minus: float, step_size: float):
     derivative = (f_plus - f_minus)/(2*step_size)
     return derivative
 
+def polar_vector(theta, cartesian_vector):
+    """This function converts the cartesian velocity to polar velocity (can go from z, zeta, or chi plane to polar velocity)"""
+    r = cartesian_vector[0]*np.cos(theta) + cartesian_vector[1]*np.sin(theta)
+    # print("\nradial velocity", velocity_r)
+    theta = cartesian_vector[1]*np.cos(theta) - cartesian_vector[0]*np.sin(theta)
+    # print("theta velocity", velocity_theta)
+    polar_vector = np.array([r, theta])
+    return polar_vector
+
 # Function to remove the middle element
 def remove_middle_element(arr):
     mid_idx = len(arr) // 2
@@ -116,7 +126,7 @@ def numerical_second_derivative(func, x, r_values=np.array([0.0]), theta_values=
     # print(f"f_plus: {f_plus}, f: {f}, f_minus: {f_minus}")  # Debug print
     return (f_plus - 2 * f + f_minus) / (h**2)
 
-def newtons_method(func, x0, r_values=np.array([0.0]), theta_values=np.array([0.0]), is_analytic_accel=False, tol=1e-12, max_iter=1000):
+def newtons_method(func, x0, r_values=np.array([0.0]), theta_values=np.array([0.0]), is_analytic_accel=False, tol=1e-10, max_iter=1000):
     """ Newton's method to find extrema of a function. """
     x = x0
     
@@ -154,13 +164,68 @@ def example_func(x, r_values, theta_values, is_analytic_accel):  # Fix argument 
 
 if __name__ == "__main__":
     # Example usage
-    initial_guess = 2.0
-    xi_eta = 1.0
-    r_values = 1
-    theta_values = 1
-    is_analytic_accel = False
-    print("\n")
-    extremum = newtons_method(example_func, initial_guess, r_values, theta_values, is_analytic_accel)
-    print(f"Extremum at Gamma = {extremum:.6f}")
-    print("\n")
+    # initial_guess = 2.0
+    # xi_eta = 1.0
+    # r_values = 1
+    # theta_values = 1
+    # is_analytic_accel = False
+    # print("\n")
+    # extremum = newtons_method(example_func, initial_guess, r_values, theta_values, is_analytic_accel)
+    # print(f"Extremum at Gamma = {extremum:.6f}")
+    # print("\n")
 
+    # r = -0.25406965
+    # q = 0.14441865
+    # s = np.sqrt(r**2 + q**2)
+    # s /= 2
+    # print("s", s)
+
+    # Define variables
+    r, theta, alpha, Gamma, V_inf, R, epsilon, r_0, rho = sympy.symbols('r theta alpha Gamma V_inf R epsilon r_0 rho', real=True)
+
+    # Define components of the function
+    rei_theta = r * sympy.exp(sympy.I * theta)
+    r0ei_theta0 = r_0 * sympy.exp(sympy.I * theta)
+
+    print("Defining the mathematical expression...")
+
+    term1 = sympy.exp(-sympy.I * alpha) + sympy.I * (Gamma / (2 * sympy.pi * V_inf)) * (1 / rei_theta) - (R**2 * sympy.exp(sympy.I * alpha)) / (rei_theta**2)
+    term2 = (-sympy.I * (Gamma / (2 * sympy.pi * V_inf)) * (1 / (rei_theta**2))) + (2 * R**2 * sympy.exp(sympy.I * alpha) / (rei_theta**3))
+    term3 = 2 * (R - epsilon)**2 / (rei_theta + r0ei_theta0)**3
+    term4 = 1 - ((R - epsilon)**2 / (rei_theta + r0ei_theta0)**2)
+
+    numerator = -2 * term1 * (term2 - (term1 * term3 * (1 / term4)))
+    denominator = term4**2
+
+    integrand = numerator / denominator * r
+
+    print("Expression successfully defined.")
+    print("Starting integration over θ from 0 to 2π...")
+
+    # Function to perform the integration
+    def perform_integration():
+        global integrated_theta
+        integrated_theta = sympy.integrate(integrand, (theta, 0, 2 * sympy.pi))
+        print("\nFirst integration step complete.")
+
+    # Function to print time ticks every 60 seconds
+    def time_ticker():
+        start_time = time.time()
+        while integration_thread.is_alive():
+            time.sleep(60)  # Wait for 60 seconds
+            elapsed_time = int(time.time() - start_time)
+            print(f"\n[Progress Update] Integration running for {elapsed_time // 60} minutes...")
+
+    # Start integration in a separate thread
+    integration_thread = threading.Thread(target=perform_integration)
+    integration_thread.start()
+
+    # Start time ticker
+    time_ticker()
+    integration_thread.join()  # Wait for integration to finish
+
+    # Multiply by constant factors
+    S = (V_inf**4 / 8) * rho * integrated_theta
+
+    print("Final expression for S obtained.")
+    print("S =", S)
