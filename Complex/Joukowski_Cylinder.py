@@ -3,12 +3,18 @@ import numpy as np # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import scipy.integrate as sp_int # type: ignore
 from scipy.integrate import dblquad # type: ignore
+from scipy.integrate import quad # type: ignore
+import time
+from matplotlib.ticker import MaxNLocator, FormatStrFormatter # type: ignore
+from matplotlib.offsetbox import AnchoredText # type: ignore
+from matplotlib.lines import Line2D # type: ignore
 # import bisection from scipy.optimize
 import helper as hlp
 from complex_potential_flow_class import potential_flow_object
 # import tqdm for progress bar
-from tqdm import tqdm
-
+from tqdm import tqdm # type: ignore
+import os # type: ignore
+import matplotlib.patches as patches  # type: ignore
 
 class cylinder(potential_flow_object):
     """This is a class that creates a cylinder object and performs calculations specific to a cylinder"""
@@ -22,51 +28,75 @@ class cylinder(potential_flow_object):
         with open(self.cyl_json_file, 'r') as json_handle:
             input = json.load(json_handle)
             print("\n")
-            self.is_D = input["geometry"]["is_trailing_edge_sharpness_D"]
-            self.D = input["geometry"]["trailing_edge_sharpness_D"]
-            self.is_appellian = input["appellian"]["compute_appellian"]
-            self.is_analytic_accel = input["appellian"]["is_analytic_accel"]
-            self.is_chi = input["appellian"]["is_chi"]
-            self.is_z = input["appellian"]["is_z"]
-            self.is_pressure_gradient = input["appellian"]["is_pressure_gradient"]
-            self.step_size = input["appellian"]["step_size"]
-            self.polynomial_order = input["appellian"]["polynomial_order"]
-            self.is_plot_appellian = input["appellian"]["is_plot_appellian"]
-            self.is_plot_D_sweep = input["plot"]["is_plot_D_sweep"]
-            self.save_fig = input["plot"]["save_fig"]
-            self.show_fig = input["plot"]["show_fig"]
-            self.plot_text = input["plot"]["plot_text"]
-            self.do_plot_streamlines = input["plot"]["do_plot_streamlines"]
-            self.cylinder_radius = input["geometry"]["cylinder_radius"] # this is the radius of the cylinder in meters. We are normalizing everything by this value. This is used in the geometry function to calculate the geometry of the cylinder.
-            self.original_cylinder_radius = self.cylinder_radius # this is the original cylinder radius in meters. We are normalizing everything by this value. This is used in the geometry function to calculate the geometry of the cylinder.
+            # use the parse_dictionary_or_return_default function from the helper file to get the values from the json file. the function inputs are as follows: parse_dictionary_or_return_default(input, ["section", "key"], default_value)
+            self.use_shape_parameter_D = hlp.parse_dictionary_or_return_default(input, ["geometry", "use_shape_parameter_D"], False)
+            self.dtheta = np.pi/hlp.parse_dictionary_or_return_default(input, ["appellian", "dtheta_(num_to_divide_pi_by)"], 1000)
+            self.is_plot_shifted_joukowski_cylinder = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_shifted_joukowski_cylinder"], False)
+            self.is_calc_rb_comparisons = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_rb_comparisons"], False)
+            self.is_plot_rb_comparisons = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_rb_comparisons"], False)
+            self.is_calc_convergence_to_kutta = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_convergence_to_kutta"], False)
+            self.is_plot_convergence_to_kutta = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_convergence_to_kutta"], False)
+            self.is_calc_theta_convergence = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_theta_convergence"], False)
+            self.is_plot_theta_convergence = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_theta_convergence"], False)
+            self.is_calc_r_convergence = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_r_convergence"], False)
+            self.is_plot_r_convergence = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_r_convergence"], False)
+            self.D = hlp.parse_dictionary_or_return_default(input, ["geometry", "shape_parameter_D"], 1.0)
+            self.is_compute_appellian = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_compute_appellian"], False)
+            self.is_calc_circulation_for_varying_shape = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_circulation_for_varying_shape"], False)
+            self.is_plot_circulation_for_varying_shape = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_circulation_for_varying_shape"], False)
+            self.appellian_is_area_integral = hlp.parse_dictionary_or_return_default(input, ["appellian", "appellian_is_area_integral"], False)
+            self.appellian_is_line_integral = hlp.parse_dictionary_or_return_default(input, ["appellian", "appellian_is_line_integral"], True)
+            if self.appellian_is_area_integral and self.appellian_is_line_integral:
+                self.appellian_is_area_integral = False
+                print("Warning: Both area and line integrals are set to True. Setting area integral to False.")
+            self.appellian_minimization_method = hlp.parse_dictionary_or_return_default(input, ["appellian", "appellian_minimization_method"], "roots_of_derive_of_poly_fit")
+            self.polynomial_order = hlp.parse_dictionary_or_return_default(input, ["appellian", "polynomial_order"], 4)
+            self.is_plot_appellian = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_appellian"], False)
+            self.is_plot_appellian_for_varying_circulation = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_appellian_for_varying_circulation"], False)
+            self.is_calc_D_sweep_alpha_considerations = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_D_sweep_alpha_considerations"], False)
+            self.is_plot_D_sweep_alpha_considerations = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_D_sweep_alpha_considerations"], False)
+            self.is_calc_z_plane_surface_pressure_distribution = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_z_plane_surface_pressure_distribution"], False) ######### go through and make this happen! Currently the calculating is tied to the plotting
+            self.is_plot_z_plane_surface_pressure_distribution = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_z_plane_surface_pressure_distribution"], False)
+            self.is_calc_pressure_alpha_considerations = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_pressure_alpha_considerations"], False)
+            self.is_plot_pressure_alpha_considerations = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_pressure_alpha_considerations"], False)
+            self.alphas_for_consideration = hlp.parse_dictionary_or_return_default(input, ["plot", "alphas_for_consideration"], [5.0, 15.0])
+            for i in range(len(self.alphas_for_consideration)):
+                self.alphas_for_consideration[i] = np.radians(self.alphas_for_consideration[i])
+            self.save_fig = hlp.parse_dictionary_or_return_default(input, ["plot", "save_fig"], False)
+            self.show_fig = hlp.parse_dictionary_or_return_default(input, ["plot", "show_fig"], False)
+            self.is_create_dsweep_gif = hlp.parse_dictionary_or_return_default(input, ["plot", "is_create_dsweep_gif"], False)
+            self.is_plot_z_selection_comparison = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_z_selection_comparison"], False)
+            self.is_plot_streamlines = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_streamlines"], False)
+            self.cylinder_radius = hlp.parse_dictionary_or_return_default(input, ["geometry", "cylinder_radius"], 1.0) # this is the radius of the cylinder. We are normalizing everything by this value. This is used in the geometry function to calculate the geometry of the cylinder.
+            self.original_cylinder_radius = self.cylinder_radius # this is the original cylinder radius. 
             self.cylinder_radius/=self.original_cylinder_radius # normalize the cylinder radius to 1. This makes the math easier. We are normalizing everything by the cylinder radius. This is used in the geometry function to calculate the geometry of the cylinder.
             self.is_airfoil = False
             self.is_text_file = False
             self.is_element = False
             self.is_cylinder = True
-            self.type = input["geometry"]["type"]
-            angle_of_attack = input["operating"]["angle_of_attack[deg]"]
+            self.type = hlp.parse_dictionary_or_return_default(input, ["geometry", "type"], "cylinder") # this is the type of geometry we are dealing with. It can be either "cylinder" or "airfoil". Default is cylinder.
+            angle_of_attack = hlp.parse_dictionary_or_return_default(input, ["operating", "angle_of_attack[deg]"], 5.0) # this is the angle of attack in degrees. We are converting it to radians later.
             self.angle_of_attack = np.radians(angle_of_attack)
-            self.freestream_velocity = input["operating"]["freestream_velocity"]
-            self.design_CL = input["geometry"]["design_CL"]
-            self.design_thickness = input["geometry"]["design_thickness"]
-            self.output_points = input["geometry"]["output_points"]
+            self.freestream_velocity = hlp.parse_dictionary_or_return_default(input, ["operating", "freestream_velocity"], 1.0) # this is the freestream velocity. This is used as a part of the velocity function to calculate the velocity at a given point in the flow field.
+            self.design_CL = hlp.parse_dictionary_or_return_default(input, ["geometry", "design_CL"], 1.0) # this is the design lift coefficient. This is used to calculate the zeta center and eccentricity for J-airfoils.
+            self.design_thickness = hlp.parse_dictionary_or_return_default(input, ["geometry", "design_thickness"], 0.2) # this is the design thickness. This is used to calculate the zeta center and eccentricity for J-airfoils.
+            self.output_points = hlp.parse_dictionary_or_return_default(input, ["geometry", "output_points"], 1000) # this is the number of points we want to output for the Joukowski airfoil geometry
             if self.output_points % 2 == 0:
                 self.even_num_points = True
             else:
                 self.even_num_points = False
             self.n_geom_points = self.output_points
             if self.type == "cylinder":
-                self.circulation = input["operating"]["vortex_strength"]
-                zeta_center = input["geometry"]["zeta_0"] # this is a list of two elements, real and imaginary parts of zeta_0. We need to convert it to a complex number
+                self.circulation = hlp.parse_dictionary_or_return_default(input, ["operating", "circulation_strength"], 0.0) # this is the circulation strength. This is used to calculate Lift through the Kutta-Joukowski theorem.
+                zeta_center = hlp.parse_dictionary_or_return_default(input, ["geometry", "zeta_0"], [-0.01, 0.0]) # this is a list of two elements, real and imaginary parts of zeta_0. We need to convert it to a complex number and normalize it by the cylinder radius.
                 self.zeta_center = (zeta_center[0] + 1j*zeta_center[1])/self.cylinder_radius
-                if self.is_D:
+                if self.use_shape_parameter_D:
                     self.epsilon = self.calc_epsilon_from_D(self.D)
                     print("epsilon from D = " + str(self.D) + " and zeta0 = " + str(self.zeta_center) + " is " + str(self.epsilon))
                     self.kutta_circulation = self.calc_circulation_J_airfoil()
                     print("Kutta circulation", self.kutta_circulation)
                 else:
-                    self.epsilon = input["geometry"]["epsilon"]
+                    self.epsilon = hlp.parse_dictionary_or_return_default(input, ["geometry", "epsilon"], self.cylinder_radius)
                     self.kutta_circulation = self.calc_circulation_J_airfoil()
                     print("Kutta circulation", self.kutta_circulation)
                     D = self.calc_D_from_epsilon()
@@ -80,12 +110,59 @@ class cylinder(potential_flow_object):
                 self.circulation = self.calc_circulation_J_airfoil() # uses the Kutta condition to calculate circulation
                 print("J airfoil circulation", self.circulation)
                 # calculate gamma so that it satisfies the Kutta condition for the airfoil
+            
+            # self.transformation_type = input["geometry"]["transformation_type"]
+            self.transformation_type = hlp.parse_dictionary_or_return_default(input, ["geometry", "transformation_type"], "joukowski") # this is the type of transformation we are using. It can be either "joukowski" or "taha". Default is Joukowski.
+            print("\nUsing " + str(self.transformation_type) + " transformation")
+            self.zeta_to_z, self.z_to_zeta, self.dZ_dzeta, self.d2Z_dzeta2 = self.general_zeta_to_z_transformation()
+            if self.transformation_type == "taha":
+                self.tau = hlp.parse_dictionary_or_return_default(input, ["geometry", "taha", "tau"], 0.1) # this is the assymetry parameter in the Taha refining Kutta paper (see Eqs 8-9)
+                self.D = hlp.parse_dictionary_or_return_default(input, ["geometry", "taha", "D"], 1.0) # this is the D parameter in the Taha refining Kutta paper (see Eqs 8-9)
+                self.epsilon = self.calc_taha_epsilon_from_tau() # this is the epsilon parameter in the Taha refining Kutta paper (see Eqs 8-9)
+                self.C = self.calc_taha_C_from_epsilon() + 1j*0.0 # this is the C parameter in the Taha refining Kutta paper (see Eqs 8-9)
+                self.zeta_center = self.calc_taha_zeta_center_from_epsilon() + 1j*0.0 # this is the zeta center in the Taha refining Kutta paper (see Eqs 8-9)
+                print("\nTaha zeta center", self.zeta_center)
+                print("Taha epsilon", self.epsilon)
+                print("Taha C", self.C)
+                print("Taha D", self.D)
+                print("Taha tau", self.tau)
+                equivalent_Joukowski_epsilon = self.equivalent_Joukowski_epsilon_from_taha_C_and_D(self.C, self.D)
+                print("Equivalent Joukowski epsilon", equivalent_Joukowski_epsilon)
+
+    def general_zeta_to_z_transformation(self):
+        """"""
+        if self.transformation_type == 'joukowski':
+            # print("\n")
+            # print("Using Joukowski transformation")
+            return self.Joukowski_zeta_to_z, self.Joukowski_z_to_zeta, self.dZ_dzeta_Joukowski, self.d2Z_dzeta2_Joukowski
+        elif self.transformation_type == 'taha':
+            # print("\n")
+            # print("Using Taha transformation")
+            return self.Taha_zeta_to_z, self.Taha_z_to_zeta, self.dZ_dzeta_Taha, self.d2Z_dzeta2_Taha
+        else:
+            raise ValueError("Invalid transformation type. Choose 'joukowski' or 'taha'.")
+        
+    def equivalent_Joukowski_epsilon_from_taha_C_and_D(self, C: float, D: float):
+        """This function calculates the equivalent Joukowski epsilon from Taha C and D"""
+        return self.cylinder_radius-C*np.sqrt((1-D)/(1+D))
 
     def calc_epsilon_from_D(self, D: float):
         """This function calculates epsilon from D"""
         epsilon_o = self.calc_J_airfoil_epsilon()
         epsilon = D*(1-epsilon_o)+epsilon_o
         return epsilon
+    
+    def calc_taha_epsilon_from_tau(self):
+        """This function calculates epsilon from tau"""
+        return 4*self.tau/(3*np.sqrt(3))
+    
+    def calc_taha_C_from_epsilon(self):
+        """This function calculates C from cylinder radius, D and epsilon"""
+        return 1/(1+self.epsilon) # right after Eq. 13 in The Principle of Minimum Pressure Gradient as a Selection Criterion for Weak Solutions of Euler’s Equation paper by Taha
+    
+    def calc_taha_zeta_center_from_epsilon(self):
+        """This function calculates zeta center from epsilon"""
+        return -self.epsilon*self.C
     
     def calc_D_from_epsilon(self):
         """This function calculates D from epsilon"""
@@ -107,14 +184,14 @@ class cylinder(potential_flow_object):
         """
         x_shifted = (x_coord - np.real(self.zeta_center))/self.cylinder_radius
         radius = self.cylinder_radius
-        theta = np.arccos(x_shifted/radius)
+        theta = np.arccos(x_shifted)
         upper = (x_coord + 1j*radius*np.sin(theta) + 1j*self.zeta_center.imag)/self.cylinder_radius
         lower = (x_coord - 1j*radius*np.sin(theta) + 1j*self.zeta_center.imag)/self.cylinder_radius
         camber = (x_coord + 1j*self.zeta_center.imag)/self.cylinder_radius
         # shift the coordinates to the center of the cylinder based on zeta_center
         return [upper.real, upper.imag], [lower.real, lower.imag], [camber.real, camber.imag]
 
-    def get_full_geometry_zeta(self):
+    def get_full_geometry_zeta(self, number_of_panel_method_points = 10, theta_offset = 0.3):
         """This function calls the geometry function across every point on the cylinder"""
         # create an empty array for the upper and lower surfaces and camber 
         n = 1000
@@ -128,7 +205,21 @@ class cylinder(potential_flow_object):
         self.upper_zeta_coords = upper
         self.lower_zeta_coords = lower
         self.camber_zeta_coords = camber
-    
+        # now space 10 points evenly in theta around the cylinder
+        N = number_of_panel_method_points
+        theta_coords = np.linspace(0.0-theta_offset, 2*np.pi-theta_offset, N) # this is creating an array of theta coordinates
+        # theta_coords = np.linspace(0.0, 2*np.pi, N) # this is creating an array of theta coordinates
+        zeta_array = np.zeros(N, dtype=complex)
+        z_array = np.zeros((N+1, 2))
+        for i in range(len(theta_coords)):
+            x, y = self.cylinder_radius*np.cos(theta_coords[i]), self.cylinder_radius*np.sin(theta_coords[i])
+            chi = x + 1j*y
+            zeta_array[i] = self.Chi_to_zeta(chi) # chi_to_zeta returns a complex number
+            z_array[i] = self.zeta_to_z(zeta_array[i], self.epsilon).real, self.zeta_to_z(zeta_array[i], self.epsilon).imag
+        z_array[-1] = z_array[0] # make sure the last point is the same as the first point
+        self.z_10_array = z_array
+        
+
     def plot_geometry_zeta(self):
         """"""
         # make the line type dashed
@@ -136,7 +227,7 @@ class cylinder(potential_flow_object):
         color = 'black'
         plt.plot(self.upper_zeta_coords[:,0], self.upper_zeta_coords[:,1], label = "Cyl", linestyle=linetype, color=color)
         plt.plot(self.lower_zeta_coords[:,0], self.lower_zeta_coords[:,1], linestyle=linetype, color=color)
-        # plt.plot(self.camber_zeta_coords[:,0], self.camber_zeta_coords[:,1], label="Camber Line", linestyle=linetype, color=color)
+        # plt.plot(self.camber_zeta_coords[:,0], self.camber_zeta_coords[:,1], linestyle=linetype, color=color)
         # plot the zeta center with a hallow circle marker
         size = 15
         # plt.scatter(self.zeta_center.real, self.zeta_center.imag, color=color, marker='o', s = size, facecolors='none', label="$\\zeta_0$")
@@ -167,7 +258,7 @@ class cylinder(potential_flow_object):
         upper = np.zeros((num_points, 2))  # Ensure upper has the correct size
         lower = np.zeros((num_points, 2))
         camber = np.zeros((num_points, 2))
-        
+
         # Make sure that x_coords has points at the leading and trailing edges
         x_coords = np.linspace(self.x_leading_edge, self.x_trailing_edge, num_points)
         
@@ -177,16 +268,7 @@ class cylinder(potential_flow_object):
         self.upper_coords = upper
         self.lower_coords = lower
         self.camber_coords = camber
-        # export upper coords and lower coords to a text file
-        if self.is_plot_D_sweep:
-            # concatenate the upper and lower coordinates
-            combined_upper_lower = np.concatenate((upper, lower), axis=0)
-            np.savetxt("combined_upper_lower_coords_at_D_is_"+str(self.D)+"_and_zeta0_is_" + str(self.zeta_center) + ".txt", combined_upper_lower)
-            print("combined upper and lower coords saved to combined_upper_lower_coords_at_D_is_"+str(self.D)+"_and_zeta0_is_" + str(self.zeta_center) + ".txt")
         return self.upper_coords, self.lower_coords, self.camber_coords
-    
-    def loop_geometry_for_D_sweep(self):
-        """loops the get_full_geometry function for a range of D values"""
     
     def get_and_plot_foci(self):
         """This function calculates and plots the foci of the ellipse using epsilon"""
@@ -196,161 +278,205 @@ class cylinder(potential_flow_object):
         self.z_leading_edge_focus = self.zeta_to_z(self.zeta_leading_edge_focus, self.epsilon)#-2*(self.cylinder_radius - self.epsilon)
         # print("Real component of z_leading_edge singularity", self.z_leading_edge_focus)
         # print("Real component of z_trailing_edge singularity", self.z_trailing_edge_focus)
-        # list_of_all_possible_markers = ['o', 's', 'D', 'v', '^', '<', '>', 'p', 'P', '*', 'X', 'd', 'H', 'h', '+', '|', '_', '1', '2', '3', '4', '8']
-        # D is a diamond, s is a square, o is a circle, v is a triangle pointing down, ^ is a triangle pointing up
+        # list_of_all_possible_markers = ['o', 's', 'D', 'v', ' ^', '<', '>', 'p', 'P', '*', 'X', 'd', 'H', 'h', '+', '|', '_', '1', '2', '3', '4', '8']
+        # D is a diamond, s is a square, o is a circle, v is a triangle pointing down,  ^ is a triangle pointing up
         # reduce size of markers 
         size = 15
         size_tri = 30
-        # plt.scatter(self.zeta_trailing_edge_focus, 0.0, color='black', marker='^', s = size_tri, label="sing")
-        # plt.scatter(self.zeta_leading_edge_focus, 0.0, color='black', marker='^', s = size_tri)
-        # plt.scatter(self.z_trailing_edge_focus, 0.0, color='black', marker='s', s = size, label = "J-np.sing")
-        # plt.scatter(self.z_leading_edge_focus, 0.0, color='black', marker='s', s = size)
+        plt.scatter(self.zeta_trailing_edge_focus, 0.0, color='black', marker='^', s = size_tri, label="sing")
+        plt.scatter(self.zeta_leading_edge_focus, 0.0, color='black', marker='^', s = size_tri)
+        plt.scatter(self.z_trailing_edge_focus, 0.0, color='black', marker='s', s = size, label = "J-np.sing")
+        plt.scatter(self.z_leading_edge_focus, 0.0, color='black', marker='s', s = size)
         return self.zeta_trailing_edge_focus, self.zeta_leading_edge_focus, self.z_trailing_edge_focus, self.z_leading_edge_focus
+    
+    def plot_geometry_settings(self):
+        # include y and x axes 
+        plt.axhline(0, color='gray')
+        plt.axvline(0, color='gray')
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.xlabel("$\\xi$/$R$")
+        plt.ylabel("$\\eta$/$R$")
+        plt.gca().xaxis.labelpad = 0.001
+        plt.gca().yaxis.labelpad = -10
+        plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
+        plt.ylim(self.plot_x_lower_lim, self.plot_x_upper_lim)
+        x_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
+        y_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
+        x_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
+        y_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
+        plt.xticks(x_ticks)
+        plt.yticks(y_ticks) 
+        plt.text(-0.07, -0.01, str(int(self.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
+        epsilon_name = "epsilon_" + str(self.epsilon)
+        zeta_0_name = "zeta_0_" + str(self.zeta_center)
+        if self.show_fig:
+            if self.type == "cylinder" and self.is_compute_appellian and self.is_plot_appellian_for_varying_circulation:
+                plt.scatter(xi_eta_vals[:, 0], xi_eta_vals[:, 1], color='red', s=5)
+                if self.save_fig:
+                    # plt.gcf().set_size_inches(3.25, 3.5)  # force figure size in inches
+                    plt.savefig("Joukowski_Cylinder_" + epsilon_name + "_" +  zeta_0_name + "_" + ".svg", dpi=300, bbox_inches=None, pad_inches=0)
+                    plt.close()
+            plt.show()
 
+    def compare_correct_and_incorrect_z_selection(self):
+        """This function plots the zeta surface points using the correct and incorrect z selection methods"""
+        # first plot the correct zeta surface points
+        upper,lower,_= self.get_full_geometry()
+        upper_complex = upper[:,0] + 1j*upper[:,1] # the type of upper_complex is an array of complex numbers
+        lower_complex = lower[:,0] + 1j*lower[:,1] # the type of lower_complex is an array of complex numbers
+
+        upper_complex_zeta = np.zeros(len(upper_complex), dtype=complex)
+        lower_complex_zeta = np.zeros(len(lower_complex), dtype=complex)
+        upper_complex_zeta_incorrect = np.zeros(len(upper_complex), dtype=complex)
+        lower_complex_zeta_incorrect = np.zeros(len(lower_complex), dtype=complex)
+        for i in range(len(upper_complex)):
+            upper_complex_zeta[i] = self.z_to_zeta(upper_complex[i], self.epsilon)
+        for j in range(len(lower_complex)):
+            lower_complex_zeta[j] = self.z_to_zeta(lower_complex[j], self.epsilon)
+        for k in range(len(upper_complex)):
+            upper_complex_zeta_incorrect[k] = self.z_to_zeta_incorrect(upper_complex[k], self.epsilon)
+        for l in range(len(lower_complex)):
+            lower_complex_zeta_incorrect[l] = self.z_to_zeta_incorrect(lower_complex[l], self.epsilon)
+
+        # now create arrays that hold the real and imaginary parts as x and y components for the complex zeta coordinates for the correct and incorrect methods
+        upper_zeta = np.zeros((len(upper_complex_zeta), 2))
+        lower_zeta = np.zeros((len(lower_complex_zeta), 2))
+        upper_zeta_incorrect = np.zeros((len(upper_complex_zeta_incorrect), 2))
+        lower_zeta_incorrect = np.zeros((len(lower_complex_zeta_incorrect), 2))
+        for i in range(len(upper_complex_zeta)):
+            upper_zeta[i] = [upper_complex_zeta[i].real, upper_complex_zeta[i].imag]
+        for j in range(len(lower_complex_zeta)):
+            lower_zeta[j] = [lower_complex_zeta[j].real, lower_complex_zeta[j].imag]
+        for k in range(len(upper_complex_zeta_incorrect)):
+            upper_zeta_incorrect[k] = [upper_complex_zeta_incorrect[k].real, upper_complex_zeta_incorrect[k].imag]
+        for l in range(len(lower_complex_zeta_incorrect)):
+            lower_zeta_incorrect[l] = [lower_complex_zeta_incorrect[l].real, lower_complex_zeta_incorrect[l].imag]      
+        # now plot z, zeta, and zeta incorrect on the same plot
+        plt.plot(upper[:,0], upper[:,1], label="$z$", color="black")
+        plt.plot(lower[:,0], lower[:,1], color="black")
+        plt.plot(upper_zeta[:,0], upper_zeta[:,1],linestyle="--", label="$\\zeta$", color="black")
+        plt.plot(lower_zeta[:,0], lower_zeta[:,1],linestyle="--", color="black")
+        plt.plot(upper_zeta_incorrect[:,0], upper_zeta_incorrect[:,1], label="$\\zeta$ incorrect", linestyle="dotted", color="black")
+        plt.plot(lower_zeta_incorrect[:,0], lower_zeta_incorrect[:,1], linestyle="dotted", color="black")
+        self.plot_geometry_settings()
+    
+    def z_to_zeta_incorrect(self, z: complex, epsilon: float):
+        """This function returns the opposite root that z_to_zeta returns"""
+        zeta_correct = self.z_to_zeta(z, epsilon)
+        z_1 = z**2 - 4*(self.cylinder_radius - epsilon)**2
+        zeta_option_1 = (z + np.sqrt(z_1))/2
+        zeta_option_2 = (z - np.sqrt(z_1))/2
+        # check if the zeta coordinate is the same as either of the options
+        if np.isclose(zeta_correct, zeta_option_1):
+            zeta = zeta_option_2
+        elif np.isclose(zeta_correct, zeta_option_2):
+            zeta = zeta_option_1
+        else:
+            raise ValueError("The zeta coordinate does not match either of the options")
+        return zeta
+    
+    def dPhi_dzeta(self, zeta, Gamma):
+        """This function calculates the derivative of Phi with respect to zeta for a Joukowski transformation"""
+        V_inf, R, alpha, zeta0 = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        return V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2)
+    
+    def d2Phi_dzeta2(self, zeta, Gamma):
+        """This function calculates the second derivative of Phi with respect to zeta for a Joukowski transformation"""
+        V_inf, R, alpha, zeta0 = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        return V_inf*(-1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)**2) + 2*np.exp(1j*alpha)*R**2/((zeta-zeta0)**3))
+    
+    def dZ_dzeta_Joukowski(self, zeta):
+        """This function calculates the derivative of Z with respect to zeta for a Joukowski transformation"""
+        epsilon, R, = self.epsilon, self.cylinder_radius
+        return 1 - (R-epsilon)**2/(zeta)**2
+    
+    def d2Z_dzeta2_Joukowski(self, zeta):
+        """This function calculates the second derivative of Z with respect to zeta for a Joukowski transformation"""
+        epsilon, R = self.epsilon, self.cylinder_radius
+        return 2*(R-epsilon)**2/(zeta)**3
+    
+    def dZ_dzeta_Taha(self, zeta):
+        """""This function calculates the derivative of Z with respect to zeta for a Taha transformation"""
+        return 1 - (1-self.D)/(1+self.D)*(self.C**2)/(zeta**2) 
+    
+    def d2Z_dzeta2_Taha(self, zeta):
+        """"""
+        return 2*(1-self.D)/(1+self.D)*(self.C**2)/(zeta)**3
+    
     def velocity(self, point_xi_eta_in_z_plane, Gamma):
         """This function calculates the velocity at a given point in the flow field in the z plane"""
         z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
         zeta = self.z_to_zeta(z, self.epsilon)
-        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
-        velocity = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2) / (1 - (R-epsilon)**2/(zeta)**2) # eq 107
+        dZ_dzeta = self.dZ_dzeta(zeta)
+        velocity = self.dPhi_dzeta(zeta, Gamma) / dZ_dzeta # eq 107
         velocity_complex = np.array([velocity.real, -velocity.imag])
         return velocity_complex
-    
-    def velocity_chi(self, point_xy_in_Chi_plane, Gamma):
-        """Start with a Chi value that is shifted from zeta_center"""
-        xi, eta = point_xy_in_Chi_plane[0], point_xy_in_Chi_plane[1]
-        zeta0 = self.zeta_center
-        Chi = xi + 1j*eta
-        zeta = Chi + zeta0
-        r, theta = hlp.xy_to_r_theta(xi, eta)
-        zeta_center = self.zeta_center
-        # xio, etao = zeta_center.real, zeta_center.imag
-        # r0, theta0 = hlp.xy_to_r_theta(xio, etao)
-        V_inf, R, alpha, epsilon = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.epsilon
-        # G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
-        # V_real = (Gamma/(2*np.pi))*((G1*G5+G2*G6)/(G5**2 + G6**2)) + V_inf*((G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
-        # V_imag = (-1*Gamma/(2*np.pi))*((G2*G5-G1*G6)/(G5**2 + G6**2)) + V_inf*((G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
-        # velocity_complex = np.array([V_real, V_imag])
-        velocity = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(Chi)) - np.exp(1j*alpha)*R**2/(Chi)**2) / (1 - (R-epsilon)**2/(Chi+zeta0)**2) # eq 107
-        velocity_complex = np.array([velocity.real, -velocity.imag])
-        return velocity_complex
-    
-    def calc_Chi_G_values(self, r, theta, alpha, epsilon, R, r0, theta0):
-        """takes in r, theta, alpha, epsilon, R, r0, theta0 and calculates the G values"""
-        G1 = np.sin(theta)/r
-        G2 = np.cos(theta)/r
-        G3 = R**2*np.cos(alpha-2*theta)/r**2
-        G4 = R**2*np.sin(alpha-2*theta)/r**2
-        G5 = 1 - ((R-epsilon)**2*(r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2)
-        G6 = ((R-epsilon)**2*(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2)
-        return G1, G2, G3, G4, G5, G6
-    
-    def z_analytic_acceleration(self, point_xi_eta_in_z_plane, Gamma):
-        """This function also calculates the acceleration at a given point in the flow field in the z plane according"""
-        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
-        zeta = self.z_to_zeta(z, self.epsilon)
-        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
-        plus = (z + np.sqrt(z**2 - 4*(R-epsilon)**2))/2
-        minus = (z - np.sqrt(z**2 - 4*(R-epsilon)**2))/2
-        if zeta == plus:
-            dzeta_dz_squared = (z+1)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
-            d2zeta_dz2 = -(2*(R-epsilon)**2)/(z**2-4*(R-epsilon)**2)**(3/2)
-        elif zeta == minus:
-            dzeta_dz_squared = (1-z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
-            d2zeta_dz2 = (2*(R-epsilon)**2)/(z**2-4*(R-epsilon)**2)**(3/2)
-        acceleration_1 = V_inf*(-1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)**2) + 2*np.exp(1j*alpha)*R**2/((zeta-zeta0)**3))*dzeta_dz_squared
-        acceleration_2 = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2)*d2zeta_dz2
-        acceleration = acceleration_1 + acceleration_2
-        # acceleration *= 2*V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2) / (1 - (R-epsilon)**2/(zeta)**2)
-        acceleration_complex = np.array([acceleration.real, -acceleration.imag])
-        theta = np.arctan2(point_xi_eta_in_z_plane[1], point_xi_eta_in_z_plane[0])
-        polar_acceleration = hlp.polar_vector(theta, acceleration_complex)
-        return polar_acceleration
 
-    def other_pressure_gradient(self, point_xi_eta_in_z_plane, Gamma):
+    def analytic_conv_accel_for_line_int_comp_conj(self, point_r_theta_in_Chi, Gamma, step_size = 1e-10):
+        """calculates the convective acceleration using the line integral method"""
+        V_inf, epsilon, R, alpha, zeta_0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        r, theta = point_r_theta_in_Chi[0], point_r_theta_in_Chi[1]
+        r_plus_dr = r + step_size
+        r_0, theta_0 = hlp.xy_to_r_theta(zeta_0.real, zeta_0.imag)
+        xi_chi, eta_chi = hlp.r_theta_to_xy(r, theta)
+        xi_chi_plus_dr, eta_chi_plus_dr = hlp.r_theta_to_xy(r_plus_dr, theta)
+        chi = xi_chi + 1j*eta_chi
+        chi_plus_dr = xi_chi_plus_dr + 1j*eta_chi_plus_dr
+        zeta = self.Chi_to_zeta(chi)
+        zeta_plus_dr = self.Chi_to_zeta(chi_plus_dr)
+        dz_dzeta, omega_of_zeta = self.dZ_dzeta(zeta), self.dPhi_dzeta(zeta, Gamma)
+        G_of_zeta = 1/dz_dzeta
+        dz_dzeta_plus_dr, omega_of_zeta_plus_dr = self.dZ_dzeta(zeta_plus_dr), self.dPhi_dzeta(zeta_plus_dr, Gamma)
+        G_of_zeta_plus_dr = 1/dz_dzeta_plus_dr
+        integrand = G_of_zeta**2*np.conj(G_of_zeta)**2*omega_of_zeta**2*np.conj(omega_of_zeta)**2
+        integrand_plus_dr = G_of_zeta_plus_dr**2*np.conj(G_of_zeta_plus_dr)**2*omega_of_zeta_plus_dr**2*np.conj(omega_of_zeta_plus_dr)**2
+        # find the partial derivative of the integrand with respect to r
+        line_int = (integrand_plus_dr - integrand)/step_size
+        return np.real(line_int)
+
+    def analytic_conv_accel_square_comp_conj(self,point_r_theta_in_Chi,Gamma):
+        r, theta = point_r_theta_in_Chi[0], point_r_theta_in_Chi[1]
+        xi_chi, eta_chi = hlp.r_theta_to_xy(r, theta)
+        chi = xi_chi + 1j*eta_chi
+        zeta = self.Chi_to_zeta(chi)
+        dphi_dzeta, d2Phi_dzeta2, dz_dzeta, d2z_dzeta2 = self.dPhi_dzeta(zeta, Gamma), self.d2Phi_dzeta2(zeta, Gamma), self.dZ_dzeta(zeta), self.d2Z_dzeta2(zeta)
+        # print("dphi_dzeta", dphi_dzeta)
+        # print("d2Phi_dzeta2", d2Phi_dzeta2)
+        # print("dz_dzeta", dz_dzeta)
+        # print("d2z_dzeta2", d2z_dzeta2)
+        dz_dzeta2 = dz_dzeta * np.conj(dz_dzeta)
+        dz_dzeta4 = dz_dzeta**2*np.conj(dz_dzeta)**2
+        conv_accel = dphi_dzeta*(d2Phi_dzeta2*dz_dzeta - dphi_dzeta*d2z_dzeta2)/dz_dzeta4
+        conv_accel_comp_conj = np.conj(conv_accel)
+        conv_accel_squared = conv_accel * conv_accel_comp_conj * dz_dzeta2 
+        return np.real(conv_accel_squared)
+    
+    def taha_analytic_conv_accel_square_comp_conj(self, point_r_theta_in_Chi, Gamma): # need to adjust so that it uses the Taha transformation
         """This function calculates the pressure gradient at a given point in the flow field in the z plane"""
-        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
-        zeta = self.z_to_zeta(z, self.epsilon)
-        point_xi_eta_in_zeta_plane = [zeta.real, zeta.imag]
-        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
-        plus = (z + np.sqrt(z**2 - 4*(R-epsilon)**2))/2
-        minus = (z - np.sqrt(z**2 - 4*(R-epsilon)**2))/2
-        first = -2*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)-(R**2*np.exp(1j*alpha))/(zeta-zeta0)**2)
-        second = -1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)**2 + 2*R**2*np.exp(1j*alpha)/(zeta-zeta0)**3
-        third = np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0) - (R**2*np.exp(1j*alpha))/(zeta-zeta0)**2
-        fourth = (1 - ((R - epsilon)**2)/(zeta**2))
-        if zeta == plus:
-            fifth = (1+z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
-            sixth = (-2*(R - epsilon)**2)/(z**2 - 4*(R - epsilon)**2)**(3/2)
-        if zeta == minus:
-            fifth = (1-z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
-            sixth = (2*(R - epsilon)**2)/((z**2 - 4*(R - epsilon)**2)**(3/2))
-        pressure_gradient = first*(second*fifth + third*sixth) / fourth
-        pressure_gradient_complex = np.array([pressure_gradient.real, -pressure_gradient.imag])
-        theta = np.arctan2(point_xi_eta_in_z_plane[1], point_xi_eta_in_z_plane[0])
-        pressure_gradient_polar = hlp.polar_vector(theta, pressure_gradient_complex)
-        magnitude_pressure_gradient_complex = np.linalg.norm(pressure_gradient_complex)
-        return pressure_gradient_complex
-
+        r, theta = point_r_theta_in_Chi[0], point_r_theta_in_Chi[1]
+        xi_chi, eta_chi = hlp.r_theta_to_xy(r, theta)
+        chi = xi_chi + 1j*eta_chi
+        zeta = self.Chi_to_zeta(chi)
+        dphi_dzeta, d2Phi_dzeta2, dz_dzeta, d2z_dzeta2 = self.dPhi_dzeta(zeta, Gamma), self.d2Phi_dzeta2(zeta, Gamma), self.dZ_dzeta(zeta), self.d2Z_dzeta2(zeta)
+        G_of_zeta = 1/dz_dzeta
+        G_of_zeta_comp_conj = np.conj(G_of_zeta)
+        G_of_zeta_squared = G_of_zeta * G_of_zeta_comp_conj
+        R, epsilon = self.cylinder_radius, self.epsilon
+        dG_dzeta = -2*(R-epsilon)**2/((1-(R-epsilon)**2/zeta**2)**2*zeta**3)
+        dG_dzeta_comp_conj = np.conj(dG_dzeta)
+        omega_of_zeta = dphi_dzeta
+        omega_of_zeta_comp_conj = np.conj(omega_of_zeta)
+        omega_of_zeta_squared = omega_of_zeta * omega_of_zeta_comp_conj 
+        a_of_zeta = d2Phi_dzeta2
+        integrand = G_of_zeta_comp_conj * a_of_zeta + omega_of_zeta_squared*dG_dzeta_comp_conj
+        integrand_comp_conj = np.conj(integrand)
+        conv_accel_squared =  G_of_zeta_squared * integrand * integrand_comp_conj 
+        return np.real(conv_accel_squared)
     
-    # def numerical_cartesian_convective_acceleration(self, point_xi_eta, Gamma, step=1e-10):
-    #     """calculates the convective acceleration numerically in the z or chi plane"""
-    #     if self.is_z:
-    #         z = point_xi_eta[0] + 1j*point_xi_eta[1]
-    #         zeta = self.z_to_zeta(z, self.epsilon)
-    #         point_z = [z.real, z.imag]
-    #         r, theta = hlp.xy_to_r_theta(zeta.real, zeta.imag)
-    #         point_r_theta = [hlp.xy_to_r_theta(z.real, z.imag)[0], hlp.xy_to_r_theta(z.real, z.imag)[1]]
-    #         # r, theta = [point_r_theta[0], point_r_theta[1]]
-    #         cartesian_z_velocity = self.velocity(point_z, Gamma)
-    #         polar_z_velocity = hlp.polar_vector(theta, cartesian_z_velocity)
-    #         omega_r, omega_theta = polar_z_velocity[0], polar_z_velocity[1]
-    #         omega_r_plus_dr, omega_r_minus_dr, omega_r_plus_dtheta, omega_r_minus_dtheta, omega_theta_plus_dr, omega_theta_minus_dr, omega_theta_plus_dtheta, omega_theta_minus_dtheta = self.function_plus_minus_step_variable(point_r_theta, Gamma, step, self.velocity)
-    #     elif self.is_chi:
-    #         r, theta = hlp.xy_to_r_theta(point_xi_eta[0], point_xi_eta[1])
-    #         point_r_theta = [r, theta]
-    #         cartesian_Chi_velocity = self.velocity_chi(point_xi_eta, Gamma)
-    #         polar_Chi_velocity = hlp.polar_vector(theta, cartesian_Chi_velocity)
-    #         omega_r, omega_theta = polar_Chi_velocity[0], polar_Chi_velocity[1]
-    #         omega_r_plus_dr, omega_r_minus_dr, omega_r_plus_dtheta, omega_r_minus_dtheta, omega_theta_plus_dr, omega_theta_minus_dr, omega_theta_plus_dtheta, omega_theta_minus_dtheta = self.function_plus_minus_step_variable(point_r_theta, Gamma, step, self.velocity_chi)
-
-    #     # calculate the partial derivatives of omega r with respect to r and theta
-    #     partial_omega_r_wrt_r = hlp.central_difference(omega_r_plus_dr, omega_r_minus_dr, step)
-    #     partial_omega_r_wrt_theta = hlp.central_difference(omega_r_plus_dtheta, omega_r_minus_dtheta, step)
-    #     # calculate the partial derivatives of omega theta with respect to r and theta
-    #     partial_omega_theta_wrt_r = hlp.central_difference(omega_theta_plus_dr, omega_theta_minus_dr, step)
-    #     partial_omega_theta_wrt_theta = hlp.central_difference(omega_theta_plus_dtheta, omega_theta_minus_dtheta, step)
-    #     # calculate the convective acceleration
-    #     convective_acceleration_r = omega_r*partial_omega_r_wrt_r + (omega_theta/r)*partial_omega_r_wrt_theta - omega_theta**2/r
-    #     convective_acceleration_theta = omega_r*partial_omega_theta_wrt_r + (omega_theta/r)*partial_omega_theta_wrt_theta + omega_r*omega_theta/r
-    #     convective_acceleration = np.array([convective_acceleration_r, convective_acceleration_theta])
-    #     # convective_acceleration = np.linalg.norm(convective_acceleration)
-    #     return convective_acceleration
-    
-    # def function_plus_minus_step_variable(self, point_r_theta, Gamma, stepsize, vel_func: callable):
-    #     """takes in a function and returns the function plus and minus a stepsize"""
-    #     r, theta = point_r_theta[0], point_r_theta[1]
-    #     r_plus, r_minus = r + stepsize, r - stepsize
-    #     theta_plus, theta_minus = theta + stepsize, theta - stepsize
-
-    #     x_r_plus, x_r_minus, y_r_plus, y_r_minus = hlp.r_theta_to_xy(r_plus, theta)[0], hlp.r_theta_to_xy(r_minus, theta)[0], hlp.r_theta_to_xy(r_plus, theta)[1], hlp.r_theta_to_xy(r_minus, theta)[1]
-    #     x_theta_plus, x_theta_minus, y_theta_plus, y_theta_minus = hlp.r_theta_to_xy(r, theta_plus)[0], hlp.r_theta_to_xy(r, theta_minus)[0], hlp.r_theta_to_xy(r, theta_plus)[1], hlp.r_theta_to_xy(r, theta_minus)[1]
-    #     omega_xy_plus_r, omega_xy_minus_r = vel_func([x_r_plus, y_r_plus], Gamma), vel_func([x_r_minus, y_r_minus], Gamma)
-    #     omega_xy_plus_theta, omega_xy_minus_theta = vel_func([x_theta_plus, y_theta_plus], Gamma), vel_func([x_theta_minus, y_theta_minus], Gamma)
-    #     omega_r_plus_dr, omega_r_minus_dr = hlp.polar_vector(theta, omega_xy_plus_r)[0], hlp.polar_vector(theta, omega_xy_minus_r)[0]
-    #     omega_r_plus_dtheta, omega_r_minus_dtheta = hlp.polar_vector(theta, omega_xy_plus_theta)[0], hlp.polar_vector(theta, omega_xy_minus_theta)[0]
-    #     omega_theta_plus_dr, omega_theta_minus_dr = hlp.polar_vector(theta, omega_xy_plus_r)[1], hlp.polar_vector(theta, omega_xy_minus_r)[1]
-    #     omega_theta_plus_dtheta, omega_theta_minus_dtheta = hlp.polar_vector(theta, omega_xy_plus_theta)[1], hlp.polar_vector(theta, omega_xy_minus_theta)[1]
-    #     return omega_r_plus_dr, omega_r_minus_dr, omega_r_plus_dtheta, omega_r_minus_dtheta, omega_theta_plus_dr, omega_theta_minus_dr, omega_theta_plus_dtheta, omega_theta_minus_dtheta
-
-    def numerical_cartesian_convective_acceleration(self, point_xi_eta, Gamma, step=1e-8):
+    def numerical_cartesian_convective_acceleration(self, point_xi_eta, Gamma, step=1e-10):
         """Calculates the convective acceleration numerically in the Cartesian (x, y) plane."""
-        if self.is_z:
-            point_xy = [point_xi_eta[0], point_xi_eta[1]]
-            velocity_func = self.velocity
-        else:
-            point_xy = point_xi_eta
-            velocity_func = self.velocity_chi
+        point_xy = [point_xi_eta[0], point_xi_eta[1]]
+        velocity_func = self.velocity
         # Compute velocity components (u, v) at the given point
         omega_xi, omega_eta = velocity_func(point_xy, Gamma)
         # Compute finite difference derivatives for du/dx, du/dy, dv/dx, dv/dy
@@ -383,20 +509,74 @@ class cylinder(potential_flow_object):
         omega_xi_minus_d_eta, omega_eta_minus_d_eta = velocities[3]
         return (omega_xi_plus_dxi, omega_xi_minus_dxi, omega_xi_plus_d_eta, omega_xi_minus_d_eta,omega_eta_plus_dxi, omega_eta_minus_dxi, omega_eta_plus_d_eta, omega_eta_minus_d_eta)  # For du/dx, du/dy, dv/dx, dv/dy
 
-    def appellian_acceleration_loop(self, Gamma: float, r_values: np.array, theta_values: np.array, dr: float, dtheta: float, is_Chi: bool, acceleration: callable):
+    def appellian_acceleration_loop(self, Gamma: float, r_values: np.array, theta_values: np.array, dr: float, dtheta: float, D, acceleration: callable):
         """"""
-        Gamma_values = np.array([Gamma])
-        # index = 0
         Appellian_value = 0.0
-        Appellian_array = np.zeros((len(Gamma_values), 2))
-        xi_eta_values = np.zeros((len(r_values)*len(theta_values), 2))
-        if is_Chi:
+        if self.appellian_is_area_integral: # using complex conjugate
+            # if abs(D) >= 0.001 and r_values[0] != r_values[-1]:
+            #     r_min, r_max = r_values[0], r_values[-1]
+            #     theta_min, theta_max = theta_values[0], theta_values[-1]
+
+            #     # Define the integrand for dblquad
+            #     def integrand(theta, r):
+            #         accel = acceleration([r, theta], Gamma)
+            #         return accel * r  # Include the r term for the area element
+
+            #     # Perform the double integration
+            #     integral, _ = dblquad(integrand, r_min, r_max, lambda r: theta_min, lambda r: theta_max)
+
+            #     # Scale the result
+            #     Appellian_value = integral * 0.5
+            #     return Appellian_value
+            # elif abs(D) >= 0.001 and r_values[0] == r_values[-1]:
+            #     def integrand(theta, r, Gamma):
+            #         """Define the integrand for the line integral."""
+            #         accel = acceleration([r, theta], Gamma)
+            #         return accel # Include the r term for the area element
+
+            #     # Use the single value of r from r_values
+            #     r = r_values[0]#+0.005*self.cylinder_radius  # Assuming r_values contains only one value
+            #     theta_start = theta_values[0]
+            #     theta_end = theta_values[-1]
+
+            #     # Perform the integration over theta
+            #     integral, _ = quad(integrand, theta_start, theta_end, args=(r, Gamma))
+
+            #     # The result of the line integral
+            #     Appellian_value = integral*(0.5)
+            #     return Appellian_value
+            # else:
             for j in range(len(r_values)):
                 for k in range(len(theta_values)):
                     area_element = r_values[j]*dr*dtheta
-                    accel = np.real(acceleration([r_values[j], theta_values[k]], Gamma)) 
+                    accel = acceleration([r_values[j], theta_values[k]], Gamma)
                     Appellian_value += accel*area_element
-            Appellian_array[0] = [Gamma, 0.5*Appellian_value]
+            return Appellian_value*(0.5)
+                # Define the integration bounds
+        elif self.appellian_is_line_integral:
+        #     if abs(D) > 0.001:
+        #         def integrand(theta, r, Gamma):
+        #             """Define the integrand for the line integral."""
+        #             accel = acceleration([r, theta], Gamma)
+        #             return accel # Include the r term for the area element
+
+        #         # Use the single value of r from r_values
+        #         r = r_values[0]#+0.005*self.cylinder_radius  # Assuming r_values contains only one value
+        #         theta_start = theta_values[0]
+        #         theta_end = theta_values[-1]
+
+        #         # Perform the integration over theta
+        #         integral, _ = quad(integrand, theta_start, theta_end, args=(r, Gamma))
+
+        #         # The result of the line integral
+        #         Appellian_value = integral*(-0.03125) # 1/32
+        #         return Appellian_value
+        #     else:
+            for k in range(len(theta_values)):
+                area_element = r_values[0]*dtheta
+                accel = acceleration([r_values[0], theta_values[k]], Gamma)
+                Appellian_value += accel*area_element
+            return Appellian_value*(-0.03125) # 1/32
         else:
             for j in range(len(r_values)):
                 for k in range(len(theta_values)):
@@ -407,69 +587,93 @@ class cylinder(potential_flow_object):
                     area_element = r_z * dr * dtheta
                     convective_acceleration = acceleration([z.real, z.imag], Gamma)
                     Appellian_value += np.dot(convective_acceleration, convective_acceleration)*area_element
-                    # index += 1
-            Appellian_array[0] = [Gamma, 0.5*Appellian_value]
-        Appellian_array = 0.5*Appellian_value
-        return Appellian_array
+        return Appellian_value*0.5
+    
+    def calculate_aft_stagnation_theta_in_Chi_from_Gamma(self, Gamma: float): # from Nate's paper
+        """"""
+        if self.freestream_velocity >= 0.0:
+            return self.angle_of_attack - np.arcsin(Gamma/(4*np.pi*self.freestream_velocity*self.cylinder_radius))
+        else:
+            raise ValueError("The freestream velocity must be greater than 0")
         
-    def numerically_integrate_appellian(self, Gamma: float, r_values: np.array, theta_values: np.array, is_analytic_accel: bool):
+    def numerically_integrate_appellian(self, Gamma: float, r_values: np.array, D):
         """This function calculates the Appellian function numerically requires evenly spaced ranges for Gamma, r, and theta in Chi"""
         # create a meshgrid of r and theta values, the first value in r_range is the lower bound the second value is the upper bound, the third value is the increment size
         # calculate the area element 
         if len(r_values) == 1:
-            dr = 1.0
+            dr = 0.01
         else:        
             dr = r_values[1] - r_values[0]
-        if len(theta_values) == 1:
-            dtheta = 1.0
-        else:
-            dtheta = theta_values[1] - theta_values[0]
-        dr_original, dtheta_original = dr, dtheta
+        theta_start = self.calculate_aft_stagnation_theta_in_Chi_from_Gamma(Gamma)
+        theta_end = 2*np.pi + theta_start
+        theta_range = [theta_start, theta_end, self.dtheta]
+        theta_values = hlp.list_to_range(theta_range)
+        # add dtheta to all values in theta_values
+        theta_values = [theta + self.dtheta/2 for theta in theta_values]
+        # remove the first and last elements of theta_values
+        # theta_values = theta_values[1:-1] # start at index 2 and end at index -2
+        # calculate distance between theta_values[0] and theta_start. Compare that to theta_values[-1] and theta_end
+        # distance_start = abs(theta_values[0] - theta_start)
+        # distance_end = abs(theta_values[-1] - theta_end)
+        # difference = abs(distance_start - distance_end)
+        # print("Distance start", distance_start)
+        # print("Distance end  ", distance_end)
+        # print("Difference    ", difference)
+        # plt.figure()
+        # self.plot_geometry_zeta()
+        # r_val = self.cylinder_radius
+        #get chi_xi and chi_eta from first theta_values point and r_val
+        # chi_xi_start_singularity, chi_eta_start_singularity = hlp.r_theta_to_xy(r_val, theta_start)
+        # chi_xi_end_singularity, chi_eta_end_singularity = hlp.r_theta_to_xy(r_val, theta_end)
+        # chi_start_singularity = chi_xi_start_singularity + 1j*chi_eta_start_singularity
+        # zeta_start_singularity = self.Chi_to_zeta(chi_start_singularity)
+        # chi_end_singularity = chi_xi_end_singularity + 1j*chi_eta_end_singularity
+        # zeta_end_singularity = self.Chi_to_zeta(chi_end_singularity)
+
+        # plt.scatter(zeta_start_singularity.real, zeta_start_singularity.imag, color='red', marker='o', s=5)
+        # plt.scatter(zeta_end_singularity.real, zeta_end_singularity.imag, color='blue', marker='o', s=5)
+        # # now plot the zeta_surface points using the theta_values
+        # for i in range(len(theta_values)):
+        #     chi_xi, chi_eta = hlp.r_theta_to_xy(r_val, theta_values[i])
+        #     chi = chi_xi + 1j*chi_eta
+        #     zeta = self.Chi_to_zeta(chi)
+        #     plt.scatter(zeta.real, zeta.imag, color='black', marker='o', s=5)
+        # # plot the original theta_start 
+        # self.plot_geometry_settings()
+        # plt.show()
+        # plt.close()
+        dr_original = dr
+        dtheta_original = self.dtheta
         # now get dr and dtheta in z plane using the zeta to z function 
-        d_zeta = hlp.r_theta_to_xy(dr, dtheta)[0] + 1j*hlp.r_theta_to_xy(dr, dtheta)[1]
+        d_Chi = hlp.r_theta_to_xy(dr, self.dtheta)[0] + 1j*hlp.r_theta_to_xy(dr, self.dtheta)[1]
+        d_zeta = self.Chi_to_zeta(d_Chi)
         d_z = self.zeta_to_z(d_zeta, self.epsilon)
         d_xi_z, d_eta_z = d_z.real, d_z.imag
-        # now these are the dr and dtheta values in the z plane
+        # now these are the dr and dtheta values in the z plane for the numerical integration in after the else statement
         dr, dtheta = hlp.xy_to_r_theta(d_xi_z, d_eta_z)
-        n = len(r_values)*len(theta_values)
-        if is_analytic_accel and self.is_z:
-            # print("ANALYTIC CONVECTIVE ACCELERATION IN Z")
-            raise ValueError("The function you are trying to use is not implemented")
-            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr, dtheta, False, self.z_convective_acceleration)
-        elif is_analytic_accel and self.is_pressure_gradient and self.is_chi: 
-            # print("ANALYTIC PRESSURE GRADIENT")
-            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr, dtheta, True, self.conv_accel_using_comp_conj)
-        elif not is_analytic_accel and self.is_z:
-            # print("NUMERICAL CONVECTIVE ACCELERATION IN Z")
-            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr, dtheta, False, self.numerical_cartesian_convective_acceleration)
-        elif not is_analytic_accel and self.is_chi:
-            # print("NUMERICAL CONVECTIVE ACCELERATION IN CHI")
-            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr_original, dtheta_original, True, self.numerical_cartesian_convective_acceleration)
-        else:
-            raise ValueError("The function you are trying to use is not implemented")
+        if self.appellian_is_area_integral:
+            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr_original, dtheta_original, D, self.analytic_conv_accel_square_comp_conj)            
+        elif self.appellian_is_line_integral:
+            r_values = np.array([self.cylinder_radius])
+            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr_original, dtheta_original, D, self.analytic_conv_accel_for_line_int_comp_conj)
+        else: 
+            Appellian_array = self.appellian_acceleration_loop(Gamma, r_values, theta_values, dr, self.dtheta, D, self.numerical_cartesian_convective_acceleration)
         return Appellian_array
-
-    def r_theta_Chi_to_r_theta_zeta(self, r_Chi, theta_Chi):
-        """This function takes in r and theta in the Chi plane and returns r and theta in the zeta plane"""
-        xi_Chi, eta_Chi = hlp.r_theta_to_xy(r_Chi, theta_Chi)
-        xi_zeta, eta_zeta = xi_Chi + self.zeta_center.real, eta_Chi + self.zeta_center.imag
-        r_zeta, theta_zeta = hlp.xy_to_r_theta(xi_zeta, eta_zeta)
-        return r_zeta, theta_zeta
     
-    def r_theta_zeta_to_r_theta_z(self, r_zeta, theta_zeta):
-        """This function takes in r and theta in the zeta plane and returns r and theta in the z plane"""
-        xi_zeta, eta_zeta = hlp.r_theta_to_xy(r_zeta, theta_zeta)
-        point_xi_eta_in_zeta = xi_zeta + 1j*eta_zeta
-        z = self.zeta_to_z(point_xi_eta_in_zeta, self.epsilon)
-        r_z, theta_z = hlp.xy_to_r_theta(z.real, z.imag)
-        return r_z, theta_z
-
-    def zeta_to_z(self, zeta: complex, epsilon: float):
+    def Joukowski_zeta_to_z(self, zeta: complex, epsilon: float):
         """This function takes in a zeta coordinate and returns the z coordinate"""
         if np.isclose(zeta.real, 0.0) and np.isclose(zeta.imag, 0.0):
             z = zeta
         else:
             z = zeta + (self.cylinder_radius - epsilon)**2/zeta # eq 96
+        return z
+    
+    def Taha_zeta_to_z(self, zeta: complex, epsilon: float):
+        """This function takes in a zeta coordinate and returns the z coordinate"""
+        if np.isclose(zeta.real, 0.0) and np.isclose(zeta.imag, 0.0):
+            z = zeta  
+        else:
+            z = zeta + ((1 - self.D)/(1 + self.D)) * (self.C**2 / zeta)
         return z
     
     def zeta_to_Chi(self, zeta: complex):
@@ -482,7 +686,7 @@ class cylinder(potential_flow_object):
         zeta = Chi + self.zeta_center
         return zeta
 
-    def z_to_zeta(self, z: complex, epsilon: float): # eq 104 
+    def Joukowski_z_to_zeta(self, z: complex, epsilon: float, D=0.0): # eq 104 
         """This function takes in a z coordinate and returns the zeta coordinate"""
         z_1 = z**2 - 4*(self.cylinder_radius - epsilon)**2
         if z_1.real > 0:
@@ -501,23 +705,30 @@ class cylinder(potential_flow_object):
             zeta = zeta_2
         return zeta
     
-    def z_to_zeta_incorrect(self, z: complex, epsilon: float):
-        """This function returns the opposite root that z_to_zeta returns"""
-        zeta_correct = self.z_to_zeta(z, epsilon)
-        z_1 = z**2 - 4*(self.cylinder_radius - epsilon)**2
-        zeta_option_1 = (z + np.sqrt(z_1))/2
-        zeta_option_2 = (z - np.sqrt(z_1))/2
-        if zeta_correct == zeta_option_1:
-            zeta = zeta_option_2
-        elif zeta_correct == zeta_option_2:
-            zeta = zeta_option_1
+    def Taha_z_to_zeta(self, z: complex, D: float = 0.0):
+        """Given a z coordinate, return the correct zeta coordinate for the transformation:
+        z = zeta + A*C**2/zeta, where A = (1-D)/(1+D)
+        """
+        A = (1 - D) / (1 + D)
+        AC2 = A * self.C**2
+        z_1 = z**2 - 4 * AC2
+
+        if z_1.real > 0:
+            zeta = (z + np.sqrt(z_1)) / 2
+            zeta_2 = (z - np.sqrt(z_1)) / 2
+        elif z_1.real < 0:
+            zeta = (z - 1j * np.sqrt(-z_1)) / 2
+            zeta_2 = (z + 1j * np.sqrt(-z_1)) / 2
+        elif z_1.imag >= 0:
+            zeta = (z + np.sqrt(z_1)) / 2
+            zeta_2 = (z - np.sqrt(z_1)) / 2
         else:
-            zeta = zeta_correct
-            print("z", z)
-            print("zeta_correct", zeta_correct)
-            print("zeta_option_1", zeta_option_1)
-            print("zeta_option_2", zeta_option_2)
-            raise ValueError("The zeta coordinate does not match either of the options")
+            zeta = (z - 1j * np.sqrt(-z_1)) / 2
+            zeta_2 = (z + 1j * np.sqrt(-z_1)) / 2
+
+        if abs(zeta_2 - self.zeta_center) > abs(zeta - self.zeta_center):
+            zeta = zeta_2
+
         return zeta
     
     def calc_J_airfoil_zeta_center(self):
@@ -571,8 +782,8 @@ class cylinder(potential_flow_object):
     def calc_J_airfoil_c4(self):
         """This function calculates the c4 location of the airfoil"""
         zeta_leading_edge, zeta_trailing_edge = self.calc_zeta_real_intercepts()
-        z_leading_edge = self.zeta_to_z(zeta_leading_edge, self.epsilon)
-        z_trailing_edge = self.zeta_to_z(zeta_trailing_edge, self.epsilon)
+        z_leading_edge = self.Joukowski_zeta_to_z(zeta_leading_edge, self.epsilon)
+        z_trailing_edge = self.Joukowski_zeta_to_z(zeta_trailing_edge, self.epsilon)
         c4 = (3*z_leading_edge+z_trailing_edge)/4
         return c4
     
@@ -584,14 +795,14 @@ class cylinder(potential_flow_object):
         # now shift the y coordinates by the imaginary part of zeta_center
         self.surface_points[:,1] = self.surface_points[:,1] - self.zeta_center.imag
         # find how far to the left the leading edge is
-        leading_edge = np.min(self.surface_points[:,0])
+        leading_edge = np.min(self.surface_points[:,0]) 
         # shift all points by that much
         self.surface_points[:,0] = self.surface_points[:,0] - leading_edge
         # find the right most point
         trailing_edge = np.max(self.surface_points[:,0])
         self.surface_points = self.surface_points/trailing_edge
         return self.surface_points
-    
+
     def make_surface_points_go_from_lower_trailing_to_upper_trailing(self):
         """This function removes duplicate points from self.surface_points while preserving order, and reorders 
         the surface points so that they go from the lower trailing edge to the upper trailing edge."""
@@ -605,7 +816,7 @@ class cylinder(potential_flow_object):
                 seen.add(point_tuple)
                 unique_points.append(point)
         # Update surface_points to only unique points, maintaining order
-        self.surface_points = np.array(unique_points)
+        self.surface_points = np.copy(unique_points)
         
     def output_J_airfoil(self):
         # flip the lower coordinates so that they go from the trailing edge to the leading edge
@@ -621,263 +832,799 @@ class cylinder(potential_flow_object):
         np.savetxt(file_name, self.surface_points, delimiter = ",", header = "x, y", comments = "")
         print("Geometry exported to", file_name)
 
-    
+    def run_J_airfoil_stuff(self):
+        """"""
+        lift = self.calc_J_airfoil_CL()
+        print("CL Joukowski: ", lift)
+        Cmo = self.calc_J_airfoil_Cmz((0+1j*0))
+        print("Cm0 Joukowski: ", Cmo)
+        c4 = self.calc_J_airfoil_c4()
+        print("C4 location Joukowski: ", c4)
+        # now find the moment coefficient at c4
+        Cmc4 = self.calc_J_airfoil_Cmz(c4)
+        print("Cmc4 Joukowski: ", Cmc4)
+        # now create the full geometry of the airfoil and export it to a text file
+        self.output_J_airfoil()
 
-    
-    def compare_correct_and_incorrect_z_selection(self):
-        """This function plots the zeta surface points using the correct and incorrect z selection methods"""
-        # first plot the correct zeta surface points
-        upper,lower,_= self.get_full_geometry()
-        upper_complex = upper[:,0] + 1j*upper[:,1] # the type of upper_complex is an array of complex numbers
-        lower_complex = lower[:,0] + 1j*lower[:,1] # the type of lower_complex is an array of complex numbers
-
-        upper_complex_zeta = np.zeros(len(upper_complex), dtype=complex)
-        lower_complex_zeta = np.zeros(len(lower_complex), dtype=complex)
-        upper_complex_zeta_incorrect = np.zeros(len(upper_complex), dtype=complex)
-        lower_complex_zeta_incorrect = np.zeros(len(lower_complex), dtype=complex)
-        for i in range(len(upper_complex)):
-            upper_complex_zeta[i] = self.z_to_zeta(upper_complex[i], self.epsilon)
-        for j in range(len(lower_complex)):
-            lower_complex_zeta[j] = self.z_to_zeta(lower_complex[j], self.epsilon)
-        for k in range(len(upper_complex)):
-            upper_complex_zeta_incorrect[k] = self.z_to_zeta_incorrect(upper_complex[k], self.epsilon)
-        for l in range(len(lower_complex)):
-            lower_complex_zeta_incorrect[l] = self.z_to_zeta_incorrect(lower_complex[l], self.epsilon)
-
-        # now create arrays that hold the real and imaginary parts as x and y components for the complex zeta coordinates for the correct and incorrect methods
-        upper_zeta = np.zeros((len(upper_complex_zeta), 2))
-        lower_zeta = np.zeros((len(lower_complex_zeta), 2))
-        upper_zeta_incorrect = np.zeros((len(upper_complex_zeta_incorrect), 2))
-        lower_zeta_incorrect = np.zeros((len(lower_complex_zeta_incorrect), 2))
-        for i in range(len(upper_complex_zeta)):
-            upper_zeta[i] = [upper_complex_zeta[i].real, upper_complex_zeta[i].imag]
-        for j in range(len(lower_complex_zeta)):
-            lower_zeta[j] = [lower_complex_zeta[j].real, lower_complex_zeta[j].imag]
-        for k in range(len(upper_complex_zeta_incorrect)):
-            upper_zeta_incorrect[k] = [upper_complex_zeta_incorrect[k].real, upper_complex_zeta_incorrect[k].imag]
-        for l in range(len(lower_complex_zeta_incorrect)):
-            lower_zeta_incorrect[l] = [lower_complex_zeta_incorrect[l].real, lower_complex_zeta_incorrect[l].imag]      
-        # now plot z, zeta, and zeta incorrect on the same plot
-        plt.figure()
-        plt.plot(upper[:,0], upper[:,1], label="$z$", color="black")
-        plt.plot(lower[:,0], lower[:,1], color="black")
-        plt.plot(upper_zeta[:,0], upper_zeta[:,1],linestyle="--", label="$\\zeta$", color="black")
-        plt.plot(lower_zeta[:,0], lower_zeta[:,1],linestyle="--", color="black")
-        plt.plot(upper_zeta_incorrect[:,0], upper_zeta_incorrect[:,1], label="$\\zeta$ incorrect", linestyle="dotted", color="black")
-        plt.plot(lower_zeta_incorrect[:,0], lower_zeta_incorrect[:,1], linestyle="dotted", color="black")
-        # plt.axhline(0, color='gray')
-        # plt.axvline(0, color='gray')
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.xlabel("$\\xi$/$R$")
-        plt.ylabel("$\\eta$/$R$")
-        plt.gca().xaxis.labelpad = 0.001
-        plt.gca().yaxis.labelpad = -10
-        plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
-        plt.ylim(self.plot_x_lower_lim, self.plot_x_upper_lim)
-        x_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
-        y_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
-        x_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
-        y_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
-        plt.xticks(x_ticks)
-        plt.yticks(y_ticks) 
-        plt.text(-0.07, -0.01, str(int(self.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-        if self.plot_text:
-            plt.text(0.05, 0.92, "$\\epsilon = $" + str(self.epsilon) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-            plt.text(0.60, 0.96, "$\\xi_0 = $" + str(self.zeta_center.real) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-            plt.text(0.60, 0.88, "$\\eta_0 = $" + str(self.zeta_center.imag) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-        # plt.legend(fontsize=12.0, loc="lower right")
-        plt.show()
-
-    def run_appellian_roots(self):
+    def run_appellian_roots(self, r_vals, theta_vals, D):
         """This function runs the Appellian stuff"""
-        if self.is_analytic_accel and self.is_chi:
-            print("ANALYTIC PRESSURE GRADIENT")
-        elif self.is_analytic_accel and self.is_z:
-            print("ANALYTIC CONVECTIVE ACCELERATION IN Z")
-        elif self.is_analytic_accel and self.is_pressure_gradient: 
-            print("ANALYTIC PRESSURE GRADIENT")
-        elif not self.is_analytic_accel and self.is_z:
-            print("NUMERICAL CONVECTIVE ACCELERATION IN Z")
-        elif not self.is_analytic_accel and self.is_chi:
-            print("NUMERICAL CONVECTIVE ACCELERATION IN CHI")
-        else:
-            raise ValueError("The function you are trying to use is not implemented")
-        r_end = self.cylinder_radius
-        r_step = 0.1*self.cylinder_radius
-        if r_end != self.cylinder_radius:
-            print("r stepsize: ", r_step)
-        r_range = [self.cylinder_radius, r_end, r_step]
-        r_vals = hlp.list_to_range(r_range)
-        theta_step = np.pi/1000
-        print("Theta Stepsize: ", theta_step)
-        theta_range = [0, 2*np.pi, theta_step]
-        theta_vals = hlp.list_to_range(theta_range)
         xi_eta_array = np.zeros((len(r_vals)*len(theta_vals), 2))
-        print("Number of points to be integrated: ", len(r_vals)*len(theta_vals))
-        if self.is_chi:
-            for i in range(len(r_vals)):
-                for j in range(len(theta_vals)):
-                    xi_eta_array[i*len(theta_vals) + j] = hlp.r_theta_to_xy(r_vals[i], theta_vals[j]) # this populates the xi_eta_array with the xi and eta values corresponding to the r and theta values in the chi plane
+        if self.appellian_minimization_method != "roots_of_derive_of_poly_fit":
+            Gamma_start = self.kutta_circulation
+            appellian_root, appellian_value = hlp.newtons_method(self.numerically_integrate_appellian, Gamma_start, r_values = r_vals, theta_values = theta_vals, D=D)
+            return appellian_root, xi_eta_array, appellian_value
+        else: # poly fit
+            if self.kutta_circulation > 0: # if self.kutta_circulation is positive, then the gamma range goes from 0 to the kutta circulation in a step size that makes it so there are 10 points in the range
+                step_size = self.kutta_circulation/10
+                Gamma_range = [0.0, self.kutta_circulation, step_size]
+            else: # if the kutta circulation is negative, then the gamma range goes from the kutta circulation to 0 in steps of 0.1
+                step_size = abs(self.kutta_circulation)/10
+                Gamma_range = [self.kutta_circulation, 0.0, step_size]
+            Gamma_vals = hlp.list_to_range(Gamma_range)
+            # print("Gamma_vals", Gamma_vals)
+            poly_order = 4
+            appellian_root, appellian_value = hlp.polyfit(self.numerically_integrate_appellian, r_vals, Gamma_vals, poly_order, self.is_plot_appellian, "$\\Gamma$", "S", "Appellian Function", D)
+            # appellian_root, appellian_value = hlp.polyfit(self.numerically_integrate_appellian, r_vals, Gamma_vals, poly_order, self.is_plot_appellian_for_varying_circulation, "$\\Gamma$", "S", "Appellian Function", D)
+            return appellian_root, xi_eta_array, appellian_value
+        
+    def calc_cL_from_appellian_root_gamma(self, Gamma_root):
+        """CL = Gamma/(0.5*V_inf*L)"""
+        x_trailing_minus_leading = self.x_trailing_edge - self.x_leading_edge
+        # transform this purely real number to a complex number
+        x_trailing_minus_leading = x_trailing_minus_leading + 0j
+        # now find the length of the airfoil in the z plane
+        cbar = self.zeta_to_z(x_trailing_minus_leading, self.epsilon)
+        # now calculate CL
+        CL = Gamma_root/(0.5*self.freestream_velocity*cbar.real)
+        return CL
+    
+    def calc_gamma_app_over_gamma_kutta(self, D_values, r_values, theta_values):
+        kutta_appellian_array = np.zeros((len(D_values), 2))
+        # self.D
+        # self.tau = 0.1 ######## remove
+        # epsilon_held = self.calc_taha_epsilon_from_tau()
+        # C = 1/(1+epsilon_held)
+        if self.transformation_type == "joukowski":
+            for i in tqdm(range(len(D_values)), desc="Calculating Appellian Roots"):  
+                self.D = D_values[i]
+                # self.epsilon = self.equivalent_Joukowski_epsilon_from_taha_C_and_D(C, D_values[i])
+                self.epsilon = self.calc_epsilon_from_D(D_values[i]) ##### before
+                kutta_appellian_array[i, 0] = D_values[i]
+                kutta_appellian_array[i, 1] = self.run_appellian_roots(r_values,theta_values, D_values[i])[0] / self.kutta_circulation  
         else:
-            # convert r and theta values to z values by first converting them to xi and eta values in the chi plane, transforming them to zeta values, and then transforming them to z values
-            for i in range(len(r_vals)):
-                for j in range(len(theta_vals)):
-                    xi_eta_chi = hlp.r_theta_to_xy(r_vals[i], theta_vals[j])[0] + 1j*hlp.r_theta_to_xy(r_vals[i], theta_vals[j])[1]
-                    xi_eta_zeta = self.Chi_to_zeta(xi_eta_chi)
-                    xi_eta_z = self.zeta_to_z(xi_eta_zeta, self.epsilon)
-                    xi_eta_array[i*len(theta_vals) + j] = np.array([xi_eta_z.real, xi_eta_z.imag])
+            for i in tqdm(range(len(D_values)), desc="Calculating Appellian Roots"):  
+                self.D = D_values[i]
+                kutta_appellian_array[i, 0] = D_values[i]
+                kutta_appellian_array[i, 1] = self.run_appellian_roots(r_values,theta_values, D_values[i])[0] / self.kutta_circulation  
+        text_file_name = "text_files/dsweep/dsweep_zeta0_" + str(cyl.zeta_center.real) + "_" + str(cyl.zeta_center.imag) + "_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".txt"
+        np.savetxt(text_file_name, kutta_appellian_array, delimiter=",", header="D, Gamma_A/Gamma_K", comments="")
+        return kutta_appellian_array
+    
+    def plot_gamma_over_gamma_kutta(self, kutta_appellian_array, is_plot_current_D=False, kutta_and_current_D=[0,0], label = "$\\Gamma_A$/$\\Gamma_K$", linestyle = "solid", is_first_file = True):
+        alpha_name = str(round(self.angle_of_attack*180/np.pi, 1)) + " [deg]"
+        if not self.is_create_dsweep_gif:
+            plt.plot(kutta_appellian_array[:,0], kutta_appellian_array[:,1], label=label, color = "black", linestyle=linestyle)
+            # plot a line at y = 1
+            tightly_dash_dotted = (0, (3, 1, 1, 1))  # tightly dashdotted
+            plt.axhline(1, color='gray', linestyle=tightly_dash_dotted)
+            # plt.plot(kutta_appellian_array[:,0], kutta_appellian_array[:,1], label="$\\alpha$ = " + alpha_name, color = "black")
+        else:
+            plt.plot(kutta_appellian_array[:,0], kutta_appellian_array[:,1], label="$\\alpha$ = " + alpha_name, color="black")
+        plt.xlabel("$D$")
+        # plt.ylabel("$\\frac{\\Gamma_A}{\\Gamma_K}$")
+        # change ylabel size
+        plt.ylabel("$\\frac{\\Gamma_A}{\\Gamma_K}$", fontsize=22)
+        # Set the y-axis label rotation
+        plt.gca().yaxis.label.set_rotation(0)
+        # plt.xscale("log")
+        # Manually set the tick locations to match the taha figure
+        # plt.xticks([0.005, 0.05, 1.0], ["0.005", "0.050", "1.000"])
+        # Adjust axis limits
+        plt.axhline(0, color='gray')
+        # plt.xlim(0.001, 1.0)  # Lower limit should be slightly less than 0.005
+        xticks = np.array([0.0,0.2,0.4,0.6,0.8,1.0])
+        xtick_labels = ["0.0", "0.2", "0.4", "0.6", "0.8", "1.0"]
+        plt.xticks(xticks, xtick_labels)
+        # move the first tick label to the right slightly
+        # plt.xticks([0.0001, 0.001, 0.01, 0.1], ["1e-4", "1e-3", "1e-2", "1e-1"])
+        plt.xlim(0.0, 1.0)  # Lower limit should be slightly less than 0.005
+        # insert text in the middle of the plot right below y = 1.0 that says "$\\Gamma_K$/$\\Gamma_k$"
+        if is_first_file:
+            plt.text(0.5, 0.9, "$\\Gamma_K/\\Gamma_K$", fontsize=17, ha='center', va='bottom')
+        # insert an arrow pointing to the line at y = 1
+        # Move the first x-tick label to the right by 0.1
+        x_tick_labels = [f"{(tick)}" for tick in xtick_labels]  # Format tick labels as integers
+        x_tick_labels[0] = f"    {x_tick_labels[0]}"  # Add spaces to move the first label
+        plt.gca().set_xticklabels(x_tick_labels)
+        yticks = np.array([-0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2])
+        ytick_labels = ["-0.2", "0.0", "0.2", "0.4", "0.6", "0.8", "1.0", "1.2"]
+        plt.yticks(yticks, ytick_labels)
+        plt.ylim(-0.2, 1.2)
+        # Adjust label padding
+        plt.gca().xaxis.labelpad = 1
+        plt.gca().yaxis.labelpad = 5
+        #include text in the top middle
+        y_range = plt.ylim()[1] - plt.ylim()[0]
+        y_offset = 0.05 * y_range
+        if is_plot_current_D:
+            plt.scatter(kutta_and_current_D[0], kutta_and_current_D[1], color="red", s = 40)
+        figure_name = "figures/dsweep_zeta0_" + str(cyl.zeta_center.real) + "_" + str(cyl.zeta_center.imag) + "_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".svg"
+        # plt.legend(loc="center right")
+        return figure_name
+    
+    def create_dsweep_gif(self, kutta_appellian_array, r_values, theta_values):
+        """This function creates a gif of the D sweep"""
+        if self.is_calc_circulation_for_varying_shape:
+            if self.transformation_type == "joukowski":
+                for i in range(len(kutta_appellian_array)):
+                    plot_names_list = []
+                    self.D = kutta_appellian_array[i,0]
+                    print("D: ", self.D)
+                    self.epsilon = self.calc_epsilon_from_D(self.D)
+                    self.circulation = kutta_appellian_array[i,1] * self.kutta_circulation
+                    gamma_over_kutta_name = self.plot_gamma_over_gamma_kutta(kutta_appellian_array, is_plot_current_D = True, kutta_and_current_D = [kutta_appellian_array[i,0], kutta_appellian_array[i,1]])
+                    # plt.gcf().set_size_inches(3.25, 3.5)  # force figure size in inches
+                    plt.savefig(gamma_over_kutta_name, dpi=300, bbox_inches=None, pad_inches=0)
+                    plot_names_list.append(gamma_over_kutta_name)
+                    plt.close()
+                    plt.figure()
+                    if self.is_plot_z_plane_surface_pressure_distribution:
+                        # circulation = self.run_appellian_roots(r_values, theta_values, self.D)[0]
+                        pressure_name_one = self.plot_surface_pressures(self.circulation, self.D)
+                        pressure_name_one = pressure_name_one.replace(".png", "_firstpressure.png")
+                        plt.legend(loc="upper right")
+                        # plt.gcf().set_size_inches(3.25, 3.5)  # force figure size in inches
+                        plt.savefig(pressure_name_one, dpi=300, bbox_inches=None, pad_inches=0)
+                        plot_names_list.append(pressure_name_one)
+                        plt.close()
+                        plt.figure()
+                        self.angle_of_attack = self.angle_of_attack + 10*np.pi/180
+                        self.kutta_circulation = self.calc_circulation_J_airfoil()
+                        circulation = self.run_appellian_roots(r_values, theta_values, self.D)[0]
+                        pressure_name_two = self.plot_surface_pressures(circulation, self.D)
+                        plt.legend(loc="upper right")
+                        pressure_name_two = pressure_name_two.replace(".png", "_secondpressure.png")
+                        # plt.gcf().set_size_inches(3.25, 3.5)  # force figure size in inches
+                        plt.savefig(pressure_name_two, dpi=300, bbox_inches=None, pad_inches=0)
+                        plot_names_list.append(pressure_name_two)
+                        plt.close()
+                        # set the angle of attack back to the original value
+                        self.angle_of_attack = self.angle_of_attack - 10*np.pi/180
+                        self.kutta_circulation = self.calc_circulation_J_airfoil()
+                    self.get_full_geometry_zeta()
+                    self.plot_geometry_zeta()
+                    self.get_full_geometry()
+                    self.plot_geometry()
+                    self.plot()
+                    self.plot_geometry_settings()
+                    geometry_name = gamma_over_kutta_name.replace(".png", "_geometry.png")
+                    # plt.gcf().set_size_inches(3.25, 3.5)  # force figure size in inches
+                    plt.savefig(geometry_name, dpi=300, bbox_inches=None, pad_inches=0)
+                    plot_names_list.append(geometry_name)
+                    plt.close()
+                    # plt.figure()
+                    combined_plot_name = gamma_over_kutta_name.replace(".png", "_combined__"+str(i)+".png")
+                    plot_names_array = np.array(plot_names_list)
+                    hlp.combine_plots(plot_names_array, combined_plot_name)
+            else:
+                for i in range(len(kutta_appellian_array)):
+                    self.D = kutta_appellian_array[i,0]
+                    print("D: ", self.D)
+                    self.circulation = kutta_appellian_array[i,1] * self.kutta_circulation
+                    gamma_over_kutta_name = self.plot_gamma_over_gamma_kutta(kutta_appellian_array, is_plot_current_D = True, kutta_and_current_D = [kutta_appellian_array[i,0], kutta_appellian_array[i,1]])
+                    # plt.gcf().set_size_inches(3.25, 3.5)  # force figure size in inches
+                    plt.savefig(gamma_over_kutta_name, dpi=300, bbox_inches=None, pad_inches=0)
+                    plt.close()
+                    plt.figure()
+                    self.get_full_geometry_zeta()
+                    self.plot_geometry_zeta()
+                    self.get_full_geometry()
+                    self.plot_geometry()
+                    self.plot()
+                    self.plot_geometry_settings()
+                    geometry_name = gamma_over_kutta_name.replace(".png", "_geometry.png")
+                    # plt.gcf().set_size_inches(3.25, 3.5)  # force figure size in inches
+                    plt.savefig(geometry_name, dpi=300, bbox_inches=None, pad_inches=0)
+                    plt.close()
+                    plt.figure()
+                    combined_plot_name = gamma_over_kutta_name.replace(".png", "_combined__"+str(i)+".png")
+                    hlp.combine_two_plots(gamma_over_kutta_name, geometry_name, combined_plot_name)
+                    # Delete all non-combined figures
+        for filename in os.listdir("figures"):
+            # if filename does not contain double underscore 
+            if "__" not in filename:
+                file_path = os.path.join("figures", filename)
+                try:
+                    os.remove(file_path)
+                    print(f"Deleted: {file_path}")
+                except Exception as e:
+                    print(f"Error deleting {file_path}: {e}")
+            # if i == 0:
+            #     break
+        hlp.create_animation_from_all_figs_in_folder("figures", "figures/Joukowski_Cylinder_animation.gif")
 
-        Gamma_start = self.kutta_circulation
-        appellian_root = hlp.newtons_method(self.numerically_integrate_appellian, Gamma_start, r_values = r_vals, theta_values = theta_vals, is_analytic_accel=self.is_analytic_accel)
-        # print appellian root out to 8 decimal places
-        print("Appellian Root", appellian_root)
-        # print("Appellian Root: ", round(appellian_root, 9))
-        if self.D == 0.0:
-            # print the percent difference between the appellian root and the kutta circulation
-            percent_difference = 100*(appellian_root - self.kutta_circulation)/self.kutta_circulation
-            print("Percent Difference Appellian to Kutta: ", percent_difference)
-        return appellian_root, xi_eta_array
+    def run_r_b_comparisons(self, r_values, theta_values, D):
+        """"""
+        # make an array of zeros to hold the values of the Appellian roots
+        appellian_roots = np.zeros((len(r_values), 3))
+        # print("r_array", r_array)
+        self.epsilon = self.calc_epsilon_from_D(D)
+        for i in tqdm(range(1, len(r_values)), desc="Calculating Appellian Roots at Varying r/R at D = " + str(D)):
+            # get current r values array by cutting the r_values array off after the current index (but include everything before and including the current index)
+            current_r_values = r_values[:i+1] # include everything before and including the current index
+            appellian_root, xi_eta_vals, appellian_value = self.run_appellian_roots(current_r_values, theta_values, D)
+            appellian_roots[i, 0] = r_values[i]
+            appellian_roots[i, 1] = appellian_root
+            appellian_roots[i, 2] = appellian_value
+        # save the Appellian roots to a text file whose name contains zeta_0, the angle of attack, theta_stepsize, and D
+        file_name = "text_files/Appellian_Roots_r_b_" + str(self.zeta_center.real) + "_alpha_" + str(round(self.angle_of_attack*180/np.pi, 1)) + "_theta_stepsize_" + str(round(theta_values[1]-theta_values[0], 4)) + "_D_" + str(D) + ".txt"
+        np.savetxt(file_name, appellian_roots, delimiter = ",", header = "D, Appellian Root")
+
+    def plot_rb_comparisons(self, file_name_array: list):
+        tightly_dash_dotted = (0, (3, 1, 1, 1))  # tightly dashdotted
+        linestyles = ['solid','dashed',tightly_dash_dotted, 'solid','dashed',tightly_dash_dotted]
+        colors = ['black', 'gray', 'black', 'gray', 'black', 'gray']
+        os.makedirs("figures", exist_ok=True)
+
+        ### First Plot: Appellian Root vs r/R ###
+        plt.figure(figsize=(8, 6))
+        all_y_values = []
+
+        for idx, file_name in enumerate(file_name_array):
+            D_val = file_name.rsplit("_", 1)[-1].rsplit(".", 1)[0]
+            label = f"D = {round(float(D_val), 2)}"
+
+            data = np.loadtxt(file_name, delimiter=",", skiprows=2) # skips the first two lines of the file
+            all_y_values.append(data[:, 1])
+
+            linestyle = linestyles[idx % len(linestyles)]
+            color = colors[idx % len(colors)]
+
+            plt.plot(data[:, 0], data[:, 1], label=label,
+                    linestyle=linestyle, color=color, linewidth=1.5)
+
+            y_all = np.concatenate(all_y_values)
+            y_min = y_all.min()
+            y_max = y_all.max()
+
+            # Compute y_max rounded up to next tick within its order of magnitude
+            if y_max != 0:
+                y_max_order = np.floor(np.log10(abs(y_max)))
+                y_max_tick = np.ceil(y_max / (10**y_max_order)) * (10**y_max_order)
+            else:
+                y_max_tick = 0.0
+
+            # Compute y_min rounded down to next tick within its order of magnitude
+            if y_min != 0:
+                y_min_order = np.floor(np.log10(abs(y_min)))
+                y_min_tick = np.floor(y_min / (10**y_min_order)) * (10**y_min_order)
+            else:
+                y_min_tick = 0.0
+
+            # Create 8 evenly spaced ticks between these bounds
+            yticks = np.linspace(y_min_tick, y_max_tick, 8)
+
+            # Round ticks to a reasonable number of decimals for display (based on smallest order of magnitude)
+            smallest_order = min(y_min_order if y_min != 0 else 0, y_max_order if y_max != 0 else 0)
+            decimal_places = int(max(0, -smallest_order + 1))
+            # yticks = np.round(yticks, decimal_places)
+            yticks = np.array([-10.0, 0.0, 10.0, 20.0, 30.0])
+
+            # Apply to plot
+            plt.ylim(yticks[0], yticks[-1])
+            plt.yticks(yticks)
+
+            plt.xlabel("$r/R$")
+            plt.ylabel("$\\Gamma_A$", rotation=0, labelpad=5)
+            x_ticks = np.array([1, 2, 4, 6, 8])  # Define x-ticks as integers
+            plt.xlim(x_ticks[0], x_ticks[-1])
+            plt.xticks(x_ticks)
+
+            # Move the first x-tick label to the right by 0.1
+            x_tick_labels = [f"{int(tick)}" for tick in x_ticks]  # Format tick labels as integers
+            x_tick_labels[0] = f" {x_tick_labels[0]}"  # Add spaces to move the first label
+            plt.gca().set_xticklabels(x_tick_labels)
     
 
+        plt.legend(
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.15),
+            ncol=3,
+            frameon=False
+        )
+
+        plt.tight_layout()
+        file1 = f"figures/Appellian_Roots_r_b_{self.zeta_center.real}_alpha_{round(self.angle_of_attack * 180 / np.pi, 1)}.svg"
+        plt.savefig(file1, format='svg', bbox_inches='tight')
+        print("r/b comparison root figure saved as:", file1)
+        plt.close()
+
+        ### Second Plot: Appellian Value vs r/R ###
+        plt.figure(figsize=(8, 6))
+        all_y_values = []
+
+        for idx, file_name in enumerate(file_name_array):
+            D_val = file_name.rsplit("_", 1)[-1].rsplit(".", 1)[0]
+            label = f"D = {round(float(D_val), 2)}"
+
+            data = np.loadtxt(file_name, delimiter=",", skiprows=2) # skips the first two lines of the file
+            data[:, 2] = data[:, 2] / data[0, 2]
+            all_y_values.append(data[:, 2])
+
+            linestyle = linestyles[idx % len(linestyles)]
+            color = colors[idx % len(colors)]
+
+            plt.plot(data[:, 0], data[:, 2], label=label,
+                    linestyle=linestyle, color=color, linewidth=1.5)
+
+            y_all = np.concatenate(all_y_values)
+            y_min = y_all.min()
+            y_max = y_all.max()
+
+            # # Compute y_max rounded up to next tick within its order of magnitude
+            # if y_max != 0:
+            #     y_max_order = np.floor(np.log10(abs(y_max)))
+            #     y_max_tick = np.ceil(y_max / (10**y_max_order)) * (10**y_max_order)
+            # else:
+            #     y_max_tick = 0.0
+
+            # # Compute y_min rounded down to next tick within its order of magnitude
+            # if y_min != 0:
+            #     y_min_order = np.floor(np.log10(abs(y_min)))
+            #     y_min_tick = np.floor(y_min / (10**y_min_order)) * (10**y_min_order)
+            # else:
+            #     y_min_tick = 0.0
+
+            # # Create 8 evenly spaced ticks between these bounds
+            # yticks = np.linspace(y_min_tick, y_max_tick, 8)
+
+            # # Round ticks to a reasonable number of decimals for display (based on smallest order of magnitude)
+            # smallest_order = min(y_min_order if y_min != 0 else 0, y_max_order if y_max != 0 else 0)
+            # decimal_places = int(max(0, -smallest_order + 1))
+            # # yticks = np.round(yticks, decimal_places)
+            yticks = np.array([500.0, 1000.0, 1500.0, 2000.0])
+
+            # Apply to plot
+            plt.ylim(1.0, yticks[-1])
+            plt.yticks(yticks)
+            
+
+        # plt.title("Appellian Value vs r/R")
+        plt.xlabel("$r/R$")
+        plt.ylabel("$\\frac{S}{S_0}$", fontsize=28, rotation=0, labelpad=20)
+        x_ticks = np.array([1.0, 2.0, 4.0, 6.0, 8.0])
+        plt.xlim(x_ticks[0], x_ticks[-1])
+        plt.xticks(x_ticks)
+
+        # Move the first x-tick label to the left
+        x_tick_labels = [f"{int(tick)}" for tick in x_ticks]  # Format tick labels as integers
+        x_tick_labels[0] = f"{x_tick_labels[0]}  "  # Add spaces to move the first label to the left
+        plt.gca().set_xticklabels(x_tick_labels)
+        # move the first x-tick to the left by 0.1
+        plt.legend(
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.15),
+            ncol=3,
+            frameon=False
+        )
+
+        plt.tight_layout()
+        file2 = f"figures/Appellian_Value_r_b_{self.zeta_center.real}_alpha_{round(self.angle_of_attack * 180 / np.pi, 1)}.svg"
+        plt.savefig(file2, format='svg', bbox_inches='tight')
+        print("r/b comparison value figure saved as:", file2)
+        plt.close()
+
+    def calc_convergence_to_kutta(self, D_values, r_values, theta_values, zeta_center):
+        """"""
+        original_zeta_center = self.zeta_center
+        original_kutta_circulation = self.kutta_circulation
+        self.zeta_center = zeta_center
+        kutta_appellian_array = np.zeros((len(D_values), 2))
+        for i in tqdm(range(len(D_values)), desc="Calculating Appellian Roots"):  
+            self.D = D_values[i]
+            # self.epsilon = self.equivalent_Joukowski_epsilon_from_taha_C_and_D(C, D_values[i])
+            self.epsilon = self.calc_epsilon_from_D(D_values[i])
+            self.kutta_circulation = self.calc_circulation_J_airfoil()
+            kutta_appellian_array[i, 0] = D_values[i]
+            kutta_appellian_array[i, 1] = abs((self.run_appellian_roots(r_values,theta_values, D_values[i])[0] - self.kutta_circulation)/self.kutta_circulation)*100 # percent error 
+            # kutta_appellian_array[i, 1] = abs(self.run_appellian_roots(r_values,theta_values, D_values[i])[0] - self.kutta_circulation) # difference
+        self.zeta_center = original_zeta_center
+        self.kutta_circulation = original_kutta_circulation
+        zeta_center_name = str(zeta_center.real) + "_" + str(zeta_center.imag) + "_"
+        file_name = "text_files/convergence_to_kutta/zeta0_" + zeta_center_name + "_alpha_" + str(round(self.angle_of_attack*180/np.pi, 1))+".txt"
+        np.savetxt(file_name, kutta_appellian_array, delimiter = ",", header = "D, Appellian Root")
+        return kutta_appellian_array
+
+    def plot_convergence_to_kutta(self, filenames):
+        """This function plots the difference between the Appellian root and the Kutta circulation for different D values and different zeta centers"""
+        linestyles = ['solid','dashed', (0, (3, 1, 1, 1)), 'solid','dashed', (0, (3, 1, 1, 1))]
+        colors = ['black', 'black', 'gray', 'gray', 'black', 'black']
+        index = 0
+        for filename in filenames:
+            data = np.loadtxt(filename, delimiter=",", skiprows=1)
+            plt.plot(data[1:, 0], data[1:, 1], 
+                    label="$\\zeta_0 /R$ = " + str(filenames[index]).replace("(", "").replace(")", "").replace("text_files/convergence_to_kutta\zeta0_","").replace("_alpha_5.0.txt", "").replace("0.0_", "0.0i").replace("_", "+"),
+                    linestyle=linestyles[index % len(linestyles)], 
+                    color=colors[index % len(colors)], 
+                    linewidth=1.5)
+            index += 1
+        # invert x-axis
+        plt.gca().invert_xaxis()
+        # include x ticks from 0.00001, 0.0001, 0.001, 0.01, and 0.1 named as 1e-5, 1e-4, 1e-3, 1e-2, and 1e-1
+        plt.xscale("log")
+        xticks = np.array([0.0001, 0.001, 0.01, 0.1])
+        xtick_labels = ["1e-4", "1e-3", "1e-2", "1e-1"]
+        plt.xticks(xticks, xtick_labels)
+        # plt.xticks([0.0001, 0.001, 0.01, 0.1], ["1e-4", "1e-3", "1e-2", "1e-1"])
+        plt.xlim(0.1, 0.0001)  # Lower limit should be slightly less than 0.005
+                    # Move the first x-tick label to the right by 0.1
+        x_tick_labels = [f"{(tick)}" for tick in xtick_labels]  # Format tick labels as integers
+        x_tick_labels[-1] = f"      {x_tick_labels[-1]}"  # Add spaces to move the first label
+        plt.gca().set_xticklabels(x_tick_labels)
+
+        plt.yscale("log")
+        # plt.yticks([0.000000001,0.00000001,0.0000001,0.000001,0.00001,0.0001, 0.001, 0.01, 0.1, 1.0, 10.0], ["1e-9","1e-8","1e-7","1e-6","1e-5","1e-4","1e-3", "1e-2", "1e-1", "1e0", "1e1"])
+        plt.yticks([1e-8, 1e-6, 1e-4, 1e-2, 1e0, 1e2], ["1e-8", "1e-6", "1e-4", "1e-2", "1e0", "1e2"])
+        # plt.yticks([0.0,1.0,2.0,3.0,4.0,5.0,6.0, 7.0], ["0.0", "1.0", "2.0", "3.0", "4.0", "5.0", "6.0", "7.0"])
+        plt.ylim(1e-8, 1e2)
+        plt.xlabel("$D$")
+        # plt.ylabel("$\\Delta \\Gamma$", rotation=0, labelpad=15)
+        # percent error y-axis label
+        plt.ylabel("$\\Gamma  \\%$ Error", labelpad=15)
+        plt.axhline(0, color='gray')
+        plt.legend(loc='upper center',bbox_to_anchor=(0.5, -0.15), ncol=2,frameon=False)
+
+    def calc_theta_convergence(self, D, r_values, theta_range_array):
+        D = round(D, 4)
+        # Ensure output directory exists
+        output_dir = "text_files/theta_grid_convergence"
+        os.makedirs(output_dir, exist_ok=True)
+        # Storage for [num_theta_steps, % error in root, % error in value]
+        appellian_roots = np.zeros((len(theta_range_array), 3))
+        # Backup original attributes
+        self.original_epsilon = self.epsilon
+        self.original_D = self.D
+        self.epsilon = self.calc_epsilon_from_D(D)
+        original_dtheta = self.dtheta
+        # To store previous values for percent error comparison
+        previous_root = None
+        previous_value = None
+        for i in tqdm(range(len(theta_range_array)), desc=f"Calculating Appellian Roots at Varying theta refinement at D = {D}"):
+            theta_values = hlp.list_to_range(theta_range_array[i])
+            num_theta = theta_range_array[i][2]
+            self.dtheta = num_theta # Update dtheta for current iteration
+            appellian_root, xi_eta_vals, appellian_value = self.run_appellian_roots(r_values, theta_values, D)
+            appellian_roots[i, 0] = num_theta
+            if i == 0:
+                # First iteration: can't compute percent error
+                appellian_roots[i, 1] = 100.0
+                appellian_roots[i, 2] = 100.0
+            else:
+                # Safeguards against division by zero
+                if previous_root != 0:
+                    root_error = abs((appellian_root - previous_root) / previous_root) * 100
+                else:
+                    root_error = np.nan
+                if previous_value != 0:
+                    value_error = abs((appellian_value - previous_value) / previous_value) * 100
+                else:
+                    value_error = np.nan
+                appellian_roots[i, 1] = root_error
+                appellian_roots[i, 2] = value_error
+            previous_root = appellian_root
+            previous_value = appellian_value
+        # Save results to file
+        file_name = f"{output_dir}/theta_convergence_{self.zeta_center.real}_alpha_{round(self.angle_of_attack * 180 / np.pi, 1)}_D_{D}.txt"
+        np.savetxt(file_name, appellian_roots, delimiter=",", header="number_theta_steps,Appellian Root %,Appellian Value %", comments='')
+        # Restore original parameters
+        self.epsilon = self.original_epsilon
+        self.D = self.original_D
+        self.dtheta = original_dtheta
+        return appellian_roots
     
-    def reset_plot_stuff(self):
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.xlabel("$\\xi$/$R$")
-        plt.ylabel("$\\eta$/$R$")
-        # plt.gca().xaxis.labelpad = 0.001
-        # plt.gca().yaxis.labelpad = -10
-        plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
-        plt.ylim(self.plot_x_lower_lim, self.plot_x_upper_lim)
-        x_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
-        y_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
-        # x_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
-        # y_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
-        # plt.xticks(x_ticks)
-        # plt.yticks(y_ticks) 
-        # plt.text(-0.07, -0.01, str(int(self.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-        # remove all ticks
-        plt.xticks([])
-        plt.yticks([])
-
-    def grid_plots(self):
-        # Reset the plot settings
-        cyl.reset_plot_stuff()
-
-        # Parameters for the polar grid
-        R = cyl.cylinder_radius  # Cylinder radius
-        zeta_center = cyl.zeta_center  # Center of the cylinder in the zeta plane
-        theta_increment = np.pi / 32  # Spacing between radial lines
-        r_increment = 0.1 * R  # Increment for radial spacing
-        max_radius = 6.0 * R  # Maximum radius for the grid
-
-        # Generate theta and r values
-        theta_vals = np.arange(0, 2 * np.pi, theta_increment)  # Angles for radial lines
-        r_vals = np.arange(R, max_radius + r_increment, r_increment)  # Radii for circular lines
-
-        # Arrays to store the lines
-        radial_lines = []
-        circular_lines = []
-
-        # Create radial lines in the zeta plane
-        for theta in theta_vals:
-            line = np.array([[zeta_center.real + r * np.cos(theta), zeta_center.imag + r * np.sin(theta)] for r in np.linspace(r_vals[0], r_vals[-1], 1000)])  # Offset by zeta_center
-            radial_lines.append(line)  # Save the line
-            plt.plot(line[:, 0], line[:, 1], color='black')  # Plot the radial line
-
-        # Create circular lines in the zeta plane
-        for r in r_vals:
-            line = np.array([[zeta_center.real + r * np.cos(theta), zeta_center.imag + r * np.sin(theta)] for theta in np.linspace(0, 2 * np.pi, 1000)])  # Offset by zeta_center
-            circular_lines.append(line)  # Save the line
-            plt.plot(line[:, 0], line[:, 1], color='black')  # Plot the circular line
-
-        # Plot the geometry of the circular cylinder in the zeta plane
-        plt.plot(cyl.upper_zeta_coords[:, 0], cyl.upper_zeta_coords[:, 1], color='black')
-        plt.plot(cyl.lower_zeta_coords[:, 0], cyl.lower_zeta_coords[:, 1], color='black')
-
-        # plt.show()
-
-        # Transform the grid to the z-plane
-        plt.figure()
-        cyl.reset_plot_stuff()
-
-        # Arrays to store the transformed lines
-        transformed_radial_lines = []
-        transformed_circular_lines = []
-
-        # Transform radial lines to the z-plane
-        for line in radial_lines:
-            transformed_line = []
-            for point in line:
-                zeta = point[0] + 1j * point[1]  # Convert to complex zeta
-                z = cyl.zeta_to_z(zeta, cyl.epsilon)  # Transform to z-plane
-                transformed_line.append([z.real, z.imag])  # Store the transformed point
-            transformed_line = np.array(transformed_line)  # Convert to numpy array
-            transformed_radial_lines.append(transformed_line)  # Save the transformed line
-            plt.plot(transformed_line[:, 0], transformed_line[:, 1], color='black')  # Plot the transformed radial line
-
-        # Transform circular lines to the z-plane
-        for line in circular_lines:
-            transformed_line = []
-            for point in line:
-                zeta = point[0] + 1j * point[1]  # Convert to complex zeta
-                z = cyl.zeta_to_z(zeta, cyl.epsilon)  # Transform to z-plane
-                transformed_line.append([z.real, z.imag])  # Store the transformed point
-            transformed_line = np.array(transformed_line)  # Convert to numpy array
-            transformed_circular_lines.append(transformed_line)  # Save the transformed line
-            plt.plot(transformed_line[:, 0], transformed_line[:, 1], color='black')  # Plot the transformed circular line
-
-        # Plot the geometry of the shape in the z-plane
-        plt.plot(cyl.upper_coords[:, 0], cyl.upper_coords[:, 1], color='black')
-        plt.plot(cyl.lower_coords[:, 0], cyl.lower_coords[:, 1], color='black')
-
+    def plot_theta_convergence(self, file_name_array: list):
+        """This function plots the theta convergence of the Appellian roots and values for varying theta refinements"""
+        linestyles = ['solid','dashed', (0, (3, 1, 1, 1)), 'solid','dashed', (0, (3, 1, 1, 1))]
+        colors = ['black', 'gray', 'black', 'gray', 'black', 'gray']
+        index = 0
+        for filename in file_name_array:
+            D_val = filename.rsplit("_", 1)[-1].rsplit(".", 1)[0]
+            label = f"D = {round(float(D_val), 4)}"
+            data = np.loadtxt(filename, delimiter=",", skiprows=2)
+            # approximate_error = np.zeros((len(data), 3))
+            # first row absolute error = 100
+            # approximate_error[0, 1] = 100 
+            # plot data_current-data_previous / data_previous*100
+            # for i in range(1, len(data)):
+                # if i==0:
+                #     approximate_error[i, 0] = data[i, 0]
+                #     approximate_error[i, 1] = 100
+                # else:
+                #     approximate_error[i, 0] = data[i, 0]
+                #     approximate_error[i, 1] = abs((data[i, 1] - data[i-1, 1])/data[i-1, 1])*100
+            plt.plot(data[:, 0], data[:, 1], 
+                    label=label,
+                    linestyle=linestyles[index % len(linestyles)], 
+                    color=colors[index % len(colors)], 
+                    linewidth=1.5)
+            index += 1
+        # invert x-axis
+        plt.gca().invert_xaxis()
+        plt.xscale("log")
+        xticks = np.array([0.0001,0.001, 0.01, 0.1, 1.0])
+        xtick_labels = ["1e-4","1e-3", "1e-2", "1e-1", "1e0"]
+        # plt.xticks(xticks, xtick_labels)
+        # plt.xlim(1.0, 0.00001)  # Lower limit should be slightly less than 0.005  
+        
+        # Move the first x-tick label to the right by 0.1
+        # x_tick_labels = [f"{(tick)}" for tick in xtick_labels]
+        # x_tick_labels[0] = f"    {x_tick_labels[0]}"  # Add spaces to move the first label
+        # plt.gca().set_xticklabels(x_tick_labels)
+        plt.yscale("log")
+        # yticks = np.array([1e-8, 1e-6, 1e-4, 1e-2, 1e0, 1e2])
+        # plt.yticks(yticks, ["1e-8", "1e-6", "1e-4", "1e-2", "1e0", "1e2"])
+        # plt.ylim(-10, 10)
+        plt.xlabel("$\\theta$ Stepsize")
+        # plt.ylabel("$\\epsilon_{approx}$", rotation=0, labelpad=5)
+        plt.ylabel("$\\epsilon_{a}$ for $\\Gamma_A$", labelpad=5)
+        plt.legend(loc='upper center',bbox_to_anchor=(0.5, -0.15), ncol=2,frameon=False)
+        plt.tight_layout()
+        file1 = f"figures/Appellian_Roots_theta_convergence_{self.zeta_center.real}_alpha_{round(self.angle_of_attack * 180 / np.pi, 1)}.svg"
+        plt.savefig(file1, format='svg', bbox_inches='tight')
+        print("theta convergence figure saved as:", file1)
         plt.show()
+        plt.close()
+        # now plot the Appellian value convergence
 
-    def conv_accel_using_comp_conj(self,point_r_theta_in_Chi,Gamma):
-        V_inf, epsilon, R, alpha, zeta_0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
-        xi_0, eta_0 = zeta_0.real, zeta_0.imag
-        r_0, theta_0 = hlp.xy_to_r_theta(xi_0, eta_0)
-        r, theta = point_r_theta_in_Chi[0], point_r_theta_in_Chi[1]
-        term1 = np.exp(-1j * alpha) + 1j * (Gamma / (2 * np.pi * V_inf)) * (1 / (r * np.exp(1j * theta))) - (R**2 * np.exp(1j * alpha)) / ((r * np.exp(1j * theta))**2)
-        # print("term1", term1)
-        term2 = (-1j * (Gamma / (2 * np.pi * V_inf)) * (1 / ((r * np.exp(1j * theta))**2))) + (2 * R**2 * np.exp(1j * alpha) / ((r * np.exp(1j * theta))**3))
-        # print("term2", term2)
-        term3 = 2 * (R - epsilon)**2 / (((r * np.exp(1j * theta)) + (r_0 * np.exp(1j * theta_0)))**3)
-        # print("term3", term3)
-        term4 = (1 - ((R - epsilon)**2 / ((r * np.exp(1j * theta)) + (r_0 * np.exp(1j * theta_0)))**2))
-        # # print("term4", term4)
-        # term1_conj = np.exp(1j * alpha) - 1j * (Gamma / (2 * np.pi * V_inf)) * (1 / (r * np.exp(-1j * theta))) - (R**2 * np.exp(-1j * alpha)) / ((r * np.exp(-1j * theta))**2)
-        # term2_conj = (1j * (Gamma / (2 * np.pi * V_inf)) * (1 / ((r * np.exp(-1j * theta))**2))) + (2 * R**2 * np.exp(-1j * alpha) / ((r * np.exp(-1j * theta))**3))
-        # term3_conj = 2 * (R - epsilon)**2 / (((r * np.exp(-1j * theta)) + (r_0 * np.exp(-1j * theta_0)))**3)
-        # term4_conj = (1 - ((R - epsilon)**2 / ((r * np.exp(-1j * theta)) + (r_0 * np.exp(-1j * theta_0)))**2))
-        conv_accel = V_inf**2 * term1 / term4 * (term2*term4 - (term1 * term3)) / term4**3
-        # conv_accel_comp_conj = V_inf**2 * term1_conj / term4_conj * (term2_conj*term4_conj - (term1_conj * term3_conj)) / term4_conj**3
-        conv_accel_comp_conj = np.conj(conv_accel)
-        conv_accel_squared = conv_accel * conv_accel_comp_conj
-        return conv_accel_squared
+        # plt.figure(figsize=(8, 6))
+        # for filename in file_name_array:
+        #     D_val = filename.rsplit("_", 1)[-1].rsplit(".", 1)[0]
+        #     label = f"D = {round(float(D_val), 2)}"
+        #     data = np.loadtxt(filename, delimiter=",", skiprows=1)
+        #     # data[:, 2] = data[:, 2] / data[0, 2]
+        #     approximate_error = np.zeros((len(data), 3))
+        #     # plot data_current-data_previous / data_previous*100
+        #     for i in range(1, len(data)):
+        #         if i==0:
+        #             approximate_error[i, 0] = data[i, 0]
+        #             approximate_error[i, 1] = 100
+        #         else:
+        #             approximate_error[i, 0] = data[i, 0]
+        #             approximate_error[i, 1] = abs((data[i, 1] - data[i-1, 1])/data[i-1, 1])*100
+        #     plt.plot(approximate_error[:, 0], approximate_error[:, 2], 
+        #             label=label,
+        #             linestyle=linestyles[index % len(linestyles)], 
+        #             color=colors[index % len(colors)], 
+        #             linewidth=1.5)
+        #     index += 1
+        # plt.xscale("log")
+        # xticks = np.array([10, 100, 1000, 10000])
+        # xtick_labels = ["1e1", "1e2", "1e3", "1e4"]
+        # plt.xticks(xticks, xtick_labels)
+        # plt.xlim(10, 10000)
+        # # Move the first x-tick label to the right by 0.1
+        # x_tick_labels = [f"{(tick)}" for tick in xtick_labels]
+        # x_tick_labels[0] = f" {x_tick_labels[0]}"  # Add spaces to move the first label
+        # plt.gca().set_xticklabels(x_tick_labels)
+        # # plt.yscale("log")
+        # # yticks = np.array([1e-8, 1e-6, 1e-4, 1e-2, 1e0, 1e2])
+        # # plt.yticks(yticks, ["1e-8", "1e-6", "1e-4", "1e-2", "1e0", "1e2"])
+        # # plt.ylim(1e-8, 1e2)
+        # plt.xlabel("Number of $\\theta$ Steps")
+        # plt.ylabel("$\\epsilon_{approx}$ for $S$", labelpad=5)
+        # plt.axhline(0, color='gray')
+        # plt.legend(loc='upper center',bbox_to_anchor=(0.5, -0.15), ncol=2,frameon=False)
+        # plt.tight_layout() 
+        # file2 = f"figures/Appellian_Value_theta_convergence_{self.zeta_center.real}_alpha_{round(self.angle_of_attack * 180 / np.pi, 1)}.svg"
+        # plt.savefig(file2, format='svg', bbox_inches='tight')
+        # print("theta convergence value figure saved as:", file2)
+        # plt.close()
+
+    def shift_joukowski_cylinder(self):
+        """This function finds shifts all the points back to where zeta_center = 0, finds how far to the left the leading edge is, and shifts all points by that much (so the leading edge is at 0)
+        Then it finds the right most point, and finds the length from the right most point to the left most point, and scales all points by that much"""
+        self.shifted_upper_coords = np.copy(self.upper_coords)
+        self.shifted_lower_coords = np.copy(self.lower_coords)
+        self.shifted_camber_coords = np.copy(self.camber_coords)
+        self.shifted_10_coords = np.copy(self.z_10_array)
+        # shift all the points back to where zeta_center = 0 by shifting the x coordinates by the real part of zeta_center as well as the y coordinates by the imaginary part of zeta_center
+        self.shifted_upper_coords[:,0], self.shifted_upper_coords[:,1] = self.upper_coords[:,0] - self.zeta_center.real, self.upper_coords[:,1] - self.zeta_center.imag
+        self.shifted_lower_coords[:,0], self.shifted_lower_coords[:,1] = self.lower_coords[:,0] - self.zeta_center.real, self.lower_coords[:,1] - self.zeta_center.imag
+        # self.shifted_camber_coords[:,0], self.shifted_camber_coords[:,1] = self.camber_coords[:,0] - self.zeta_center.real, self.camber_coords[:,1] - self.zeta_center.imag
+        self.shifted_10_coords[:,0], self.shifted_10_coords[:,1] = self.z_10_array[:,0] - self.zeta_center.real, self.z_10_array[:,1] - self.zeta_center.imag
+        # find the left most point in the upper coords and shift all points by that much
+        upper_leading_edge = np.min(self.shifted_upper_coords[:,0])
+        self.shifted_upper_coords[:,0] = self.shifted_upper_coords[:,0] - upper_leading_edge
+        self.shifted_lower_coords[:,0] = self.shifted_lower_coords[:,0] - upper_leading_edge
+        # self.shifted_camber_coords[:,0] = self.shifted_camber_coords[:,0] - upper_leading_edge
+        self.shifted_10_coords[:,0] = self.shifted_10_coords[:,0] - upper_leading_edge
+        # find the right most point in the upper coords and scale all points by that much
+        upper_trailing_edge = np.max(self.shifted_upper_coords[:,0])
+        self.shifted_upper_coords = self.shifted_upper_coords/upper_trailing_edge
+        self.shifted_lower_coords = self.shifted_lower_coords/upper_trailing_edge
+        # self.shifted_camber_coords = self.shifted_camber_coords/upper_trailing_edge
+        self.shifted_10_coords = self.shifted_10_coords/upper_trailing_edge
+        return self.shifted_upper_coords, self.shifted_lower_coords
+
+    def plot_shifted_joukowski_cylinder(self):
+        """This function plots the shifted Joukowski cylinder"""
+        fig, ax = plt.subplots(figsize=(8, 6))
+        # plot the upper and lower coords
+        self.combined_coords = np.concatenate((self.shifted_upper_coords, self.shifted_lower_coords[::-1]), axis=0)
+        ax.plot(self.shifted_upper_coords[:,0], self.shifted_upper_coords[:,1], color='black')
+        ax.plot(self.shifted_lower_coords[:,0], self.shifted_lower_coords[:,1], color='black')
+        # plot the upper and lower 10 coords with points on them
+        ax.plot(self.shifted_10_coords[:,0], self.shifted_10_coords[:,1], marker='o', color='black', markersize=2)
+        # ax.scatter(self.shifted_10_coords[0,0], self.shifted_10_coords[0,1], color='black', marker='o', s=20)
+        # insert text between each point in shifted_10_coords by finding the location of each point and moving out normal to the line connecting the two points. The text numbers are 1, 2, 3, ... , len(shifted_10_coords)
+        reversed_coords = self.shifted_10_coords[::-1]
+        # plot a line from point = [0.5, 0.0] to the first element in reversed_coords
+        if self.D == 1.0:
+            ax.plot([0.0,1.0], [0.0,0.0], color='black', linewidth=1)
+            x_values_for_angle, y_values_for_angle = [0.5, reversed_coords[0,0]], [0.0, reversed_coords[0,1]]
+            ax.plot(x_values_for_angle,y_values_for_angle, color = "black", linewidth = 1)
+            # Calculate the angle between the two lines choose the smaller angle
+            angle = (np.arctan2(y_values_for_angle[1] - y_values_for_angle[0], x_values_for_angle[1]-x_values_for_angle[0])) # angle in radians
+            # Arc parameters
+            arc_radius = 0.2  # Adjust as needed for visual clarity
+            theta1 = np.degrees(angle)  # End angle in degrees0  # Start angle in degrees (horizontal to the right)
+            theta2 = 0.0
+            # Create the arc
+            arc = patches.Arc((x_values_for_angle[0], y_values_for_angle[0]), 2*arc_radius, 2*arc_radius, angle=0,
+                            theta1=theta1, theta2=theta2, color='black', lw=1.0)
+            # Add the arc to the axes
+            ax.add_patch(arc)
+            # Optionally, add an angle label
+            ax.text(x_values_for_angle[0] + arc_radius * np.cos(np.radians(theta2/2))+0.01,
+                    y_values_for_angle[0] + arc_radius * np.sin(np.radians(theta2/2))-0.06,
+                    "$\\theta_{stag,aft}$", fontsize=14)
+        fontsize = 17
+        for i in range(len(reversed_coords)-1):
+            # find the value in combined_coords that is closest to the value in reversed_coords[i]
+            closest_value = np.argmin(np.abs(self.combined_coords - reversed_coords[i]), axis=0)
+            # find tangent vector in combined_coords
+            tangent_vector = self.combined_coords[closest_value[0]+1] - self.combined_coords[closest_value[0]]
+            # find the tangent vector by subtracting the two points
+            tangent_vector = reversed_coords[i+1] - reversed_coords[i]
+            tangent_text_vector = reversed_coords[i+1] - reversed_coords[i-1]
+            point_between = (reversed_coords[i] + reversed_coords[i+1]) / 2
+            # find the normal vector by rotating the tangent vector 90 degrees
+            normal_vector = np.array([-tangent_vector[1], tangent_vector[0]])
+            normal_text_vector = np.array([-tangent_text_vector[1], tangent_text_vector[0]])
+            # normalize the normal vector
+            normal_vector = normal_vector / np.linalg.norm(normal_vector)
+            normal_text_vector = normal_text_vector / np.linalg.norm(normal_text_vector)
+            # move out from the point in the normal direction by 0.05
+            text_x = reversed_coords[i,0] + 0.08* normal_text_vector[0]
+            text_y = reversed_coords[i,1] + 0.08 * normal_text_vector[1]
+            if i == 0:
+                ax.text(text_x-0.03, text_y-0.06, str(i+1), fontsize=fontsize)
+                ax.text(text_x-0.01, text_y+0.02, str(len(reversed_coords)-1), fontsize=fontsize)
+            elif i == 1: # last point
+                pass # don't do it
+            else:
+                ax.text(text_x, text_y, str(i), fontsize=fontsize)
+                # ax.text(text_x, text_y-0.02, str(i+1), fontsize=8)
+                # ax.text(text_x, text_y+0.02, str(len(reversed_coords)), fontsize=8)
+            # else:
+            # # plot a normal line vector from point_between in the normal direction (except for the last and first points)
+            if i > 0:
+                ax.plot([point_between[0], point_between[0] + 0.1 * normal_vector[0]], [point_between[1], point_between[1] + 0.1 * normal_vector[1]], color='black', linewidth=0.5)
+
+        ax.set_xlabel("x/c")
+        # set x-axis ticks to be -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2
+        x_ticks = np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2])
+        x_tick_labels = np.array(["0.0", "0.2", "0.4", "0.6", "0.8", "1.0", "1.2"])
+        ax.set_xticks(x_ticks, x_tick_labels) # 1.3 because the right most point is 1.2
+        # x-axis limit
+        ax.set_xlim(-0.2, 1.2)
+        # move the first x-tick label to the right
+        # x_tick_labels = [f"{tick:.1f}" for tick in np.arange(-0.2, 1.3, 0.2)]  # Format tick labels as floats
+        # x_tick_labels[0] = f"    {x_tick_labels[0]}"  # Add spaces to move the first label
+        # set the x-tick labels
+        # ax.set_xticklabels(x_tick_labels)
+        # set y-axis ticks to be -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6
+        ax.set_yticks(np.arange(-0.8, 0.9, 0.4)) # 0.7 because the upper most point is 0.6
+        # y-axis limit
+        ax.set_ylim(-0.8, 0.8)
+        # set the y-axis label to be vertical
+        ax.set_ylabel("y/c", rotation=0, labelpad=15)
+        # set the aspect ratio to be equal
+        ax.set_aspect('equal', adjustable='box')
+        file_name = "figures/shifted_joukowski_cylinder_" + str(self.zeta_center.real) + "_alpha_" + str(round(self.angle_of_attack*180/np.pi, 1)) + ".svg"
+        plt.savefig(file_name, format='svg', bbox_inches='tight')
+        print("Shifted Joukowski cylinder figure saved as:", file_name)
+        plt.close()
+
+    def calculate_surface_pressure(self, point_xi_eta_in_zplane, Gamma):
+        """This function calculates the surface pressure at a point using the velocity at that point"""
+        velocity = self.velocity(point_xi_eta_in_zplane, Gamma)
+        V_squared = np.dot(velocity, velocity)
+        pressure = 1-(V_squared/self.freestream_velocity**2)
+        return pressure
+
+    def calculate_surface_pressures(self, Gamma):
+        """This function calculates the surface pressures at all the points on the airfoil."""
+        pressures_upper = np.zeros((len(self.upper_coords), 2))
+        pressures_lower = np.zeros((len(self.lower_coords), 2))
+        self.shifted_upper_coords, self.shifted_lower_coords = self.shift_joukowski_cylinder()
+        for i in range(len(self.upper_coords)):
+            x, y = self.upper_coords[i]
+            # Handle the tangent vector calculation for the last point
+            if i < len(self.upper_coords) - 1:
+                node_i_plus_one = self.upper_coords[i + 1]
+            else:
+                node_i_plus_one = self.upper_coords[0]  # Wrap around to the first point for the last node
+            node_i = self.upper_coords[i]
+            # Calculate tangent vector by subtracting the two nodes
+            tangent_vector = node_i_plus_one - node_i
+            # Calculate normal vector by rotating the tangent vector 90 degrees
+            normal_vector = np.array([-tangent_vector[1], tangent_vector[0]])
+            # Normalize the normal vector
+            normal_vector = normal_vector / np.linalg.norm(normal_vector)
+            # Step off the point in the normal direction
+            point_xy = np.array([x, y]) + 1e-6 * normal_vector
+            # Calculate the pressure at the stepped-off point
+            pressure = self.calculate_surface_pressure(point_xy, Gamma)
+            # pressures_upper[i, 0] = point_xy[0] # x-coordinate of the point
+            pressures_upper[i, 0] = self.shifted_upper_coords[i, 0]  # x-coordinate of the point
+            pressures_upper[i, 1] = pressure  # Pressure coefficient at the point
+        for j in range(len(self.lower_coords)):
+            x, y = self.lower_coords[j]
+            # Handle the tangent vector calculation for the last point
+            if j < len(self.lower_coords) - 1:
+                node_j_plus_one = self.lower_coords[j + 1]
+            else:
+                node_j_plus_one = self.lower_coords[0]
+            node_j = self.lower_coords[j]
+            # Calculate tangent vector by subtracting the two nodes
+            tangent_vector = node_j_plus_one - node_j
+            # Calculate normal vector by rotating the tangent vector 90 degrees
+            normal_vector = np.array([-tangent_vector[1], tangent_vector[0]])
+            # Normalize the normal vector
+            normal_vector = normal_vector / np.linalg.norm(normal_vector)
+            #step off the point in the normal direction
+            point_xy = np.array([x, y]) + 1e-6 * normal_vector
+            # calculate the pressure at the stepped-off point
+            pressure = self.calculate_surface_pressure(point_xy, Gamma)
+            # pressures_lower[j, 0] = point_xy[0] # x-coordinate of the point
+            pressures_lower[j, 0] = self.shifted_lower_coords[j, 0]  # x-coordinate of the point
+            pressures_lower[j, 1] = pressure  # Pressure coefficient at the point
+        return pressures_upper, pressures_lower
+
+    def plot_surface_pressures(self, Gamma, D):
+        """This function plots the surface pressures"""
+        pressures_upper, pressures_lower = self.calculate_surface_pressures(Gamma)
+        alpha_label = "$\\alpha$ = " + str(round(self.angle_of_attack*180/np.pi, 1)) + " [deg]"
+        if self.is_create_dsweep_gif or not self.is_pressure_alpha_considerations:
+            line, = plt.plot(pressures_upper[:, 0], pressures_upper[:, 1], label = alpha_label, color = "black")  # Plot the first line and capture its properties
+        else:
+            line, = plt.plot(pressures_upper[:, 0], pressures_upper[:, 1], label = alpha_label)  # Plot the first line and capture its properties
+        plt.plot(pressures_lower[:, 0], pressures_lower[:, 1], color=line.get_color())  # Use the same color as the first line
+        plt.xlabel("$\\xi/\\bar{c}$")
+        plt.ylabel("$C_p$")
+        # rotate the y axis label to be horizontal
+        plt.gca().yaxis.label.set_rotation(0)
+        # plt.title("Surface Pressure Coefficient")
+        # label padding
+        plt.gca().yaxis.labelpad = 15 # distance between label and axis
+        plt.gca().xaxis.labelpad = 1
+        plt.xlim(0, 1.0)
+        plt.ylim(-6.0, 1.0)
+        # Make the plot decrease in the positive y direction
+        plt.gca().invert_yaxis()
+        # set x-axis ticks to be 0.2, 0.4, 0.6, 0.8, 1.0
+        plt.xticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0], ["    0.0", "0.2", "0.4", "0.6", "0.8", "1.0"])
+        # Save the figure
+        filename = "figures/Appellian_D_sweep_at_zeta_center_" + str(self.zeta_center.real) + "_alpha_" + str(round(self.angle_of_attack*180/np.pi, 1)) + "_D_" + str(round(D, 2)) + ".png"
+        if self.save_fig:
+            # plt.gcf().set_size_inches(3.25, 3.5)  # force figure size in inches
+            plt.savefig(str(filename) + "_surface_pressure_at_" + str(self.angle_of_attack) + "_degrees.png", dpi=300, bbox_inches=None, pad_inches=0)
+        # if self.show_fig:
+            # plt.show()
+        # plt.close()
+        return filename
     
-    def pressure_gradient(self, point_xi_eta_in_z, Gamma):
-        """Takes in a point in the zeta plane and returns the pressure gradient"""
-        z = point_xi_eta_in_z[0] + 1j*point_xi_eta_in_z[1]
-        xi, eta = point_xi_eta_in_z[0], point_xi_eta_in_z[1]
-        zeta = self.z_to_zeta(z, self.epsilon)
-        point_xi_eta_in_zeta_plane = [zeta.real, zeta.imag]
-        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center      
-        first = (-2*(V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2) / (1 - (R-epsilon)**2/(zeta)**2)))/V_inf**2
-        # second_1 = -1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)**2 + (2*R**2*np.exp(1j*alpha))/(zeta-zeta0)**3
-        # second_2 = np.exp(-1j*alpha)+1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0) - (R**2*np.exp(1j*alpha))/(zeta-zeta0)**2
-        # second_3 = (2*(R-epsilon)**2/zeta**3)/(1-(R-epsilon)**2/zeta**2)
-        # second_4 = (1-(R-epsilon)**2/zeta**2)**2
-        # second_d2 = V_inf*(second_1-second_2*second_3)/second_4
-        second_d2 = V_inf*((-1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0)**2 + (2*R**2*np.exp(1j*alpha))/(zeta-zeta0)**3)-(np.exp(-1j*alpha)+1j*Gamma/(2*np.pi*V_inf)*1/(zeta-zeta0) - (R**2*np.exp(1j*alpha))/(zeta-zeta0)**2)*((2*(R-epsilon)**2/zeta**3)/(1-(R-epsilon)**2/zeta**2)))/((1-(R-epsilon)**2/zeta**2)**2)
-        Dcp = -first*second_d2
-        pressure_gradient_complex = np.array([Dcp.real, -Dcp.imag])
-        # pressure_gradient_polar = hlp.polar_vector(np.arctan2(point_xi_eta_in_z[1], point_xi_eta_in_z[0]), pressure_gradient_complex)
-        # magnitude_pressure_gradient_complex = np.linalg.norm(pressure_gradient_polar)
-        # theta = np.arctan2(point_xi_eta_in_z[1], point_xi_eta_in_z[0])
-        # pressure_gradient_polar = hlp.polar_vector(theta, pressure_gradient_complex)
-        magnitude_pressure_gradient_complex = np.linalg.norm(pressure_gradient_complex)
-        return magnitude_pressure_gradient_complex
-
 if __name__ == "__main__":
     ## initialize the cylinder object
     plt.rcParams["font.family"] = "Serif"
@@ -905,137 +1652,257 @@ if __name__ == "__main__":
     }
     cyl = cylinder("Joukowski_Cylinder.json")
     print("\n")
-    if cyl.is_appellian and cyl.type == "cylinder":
-        appellian_roots, xi_eta_vals = cyl.run_appellian_roots()
-        # appellian_roots, xi_eta_vals = cyl.run_appellian_stuff()
+    if cyl.appellian_is_line_integral:
+        r_range = [cyl.cylinder_radius, cyl.cylinder_radius, 0.01*cyl.cylinder_radius]
+    else:
+        # r_range = [cyl.cylinder_radius, 7*cyl.cylinder_radius, 0.01*cyl.cylinder_radius]
+        r_range = [cyl.cylinder_radius, 7*cyl.cylinder_radius, 0.007*cyl.cylinder_radius]
+    r_values = hlp.list_to_range(r_range)
+    # r_values = np.array([cyl.cylinder_radius])
+    theta_range = [0.0, 2*np.pi, np.pi/1000]
+    theta_values = hlp.list_to_range(theta_range)
+    if cyl.is_compute_appellian and cyl.type == "cylinder":
+        appellian_root, xi_eta_vals, appelian_value = cyl.run_appellian_roots(r_values, theta_values, cyl.D)
+        cyl.circulation = appellian_root
+        print("theta steps: ", theta_range[2])
+        print("Appellian Root: ", appellian_root)
+        print("Appellian Value: ", appelian_value)
+        print("percent difference between Appellian and Kutta: ", 100*(appellian_root - cyl.kutta_circulation)/cyl.kutta_circulation)
     plt.figure()
+    if cyl.is_calc_circulation_for_varying_shape:
+        D_range_first = [0.0001,0.0009, 0.0001]
+        D_values_first = hlp.list_to_range(D_range_first)
+        D_range_second = [0.001, 0.009, 0.001]
+        D_values_second = hlp.list_to_range(D_range_second)
+        D_range_third = [0.01, 1.00, 0.01]
+        D_values_third = hlp.list_to_range(D_range_third)
+        D_values = np.concatenate((D_values_second, D_values_third), axis=0)
+        print("number of D values: ", len(D_values))
+        kutta_appellian_array = cyl.calc_gamma_app_over_gamma_kutta(D_values, r_values, theta_values)
+        if cyl.is_plot_circulation_for_varying_shape:
+            cyl.plot_gamma_over_gamma_kutta(kutta_appellian_array, is_plot_current_D = False, kutta_and_current_D = [kutta_appellian_array[0,0], kutta_appellian_array[0,1]])
+            plt.savefig("figures/dsweep_zeta0_" + str(cyl.zeta_center.real) + "_" + str(cyl.zeta_center.imag) + "_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".svg", dpi=300, bbox_inches=None, pad_inches=0)
+        if cyl.is_plot_D_sweep_alpha_considerations:
+            for i in range(len(cyl.alphas_for_consideration)):
+                cyl.angle_of_attack = cyl.alphas_for_consideration[i]
+                cyl.kutta_circulation = cyl.calc_circulation_J_airfoil()
+                kutta_appellian_array = cyl.calc_gamma_app_over_gamma_kutta(D_values, r_values, theta_values)
+                cyl.plot_gamma_over_gamma_kutta(kutta_appellian_array, is_plot_current_D = False, kutta_and_current_D = [kutta_appellian_array[0,0], kutta_appellian_array[0,1]])
+            plt.legend()
+            # save the figure
+            plt.savefig("figures/dsweep_zeta0_" + str(cyl.zeta_center.real) + "_" + str(cyl.zeta_center.imag) + "_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".svg", dpi=300, bbox_inches=None, pad_inches=0)
+        plt.figure()
+        if cyl.transformation_type == "joukowski":
+            with open(cyl.cyl_json_file, 'r') as json_handle:
+                input = json.load(json_handle)
+                cyl.D = hlp.parse_dictionary_or_return_default(input, ["geometry", "shape_parameter_D"], cyl.D)
+                if cyl.use_shape_parameter_D:
+                    cyl.epsilon = cyl.calc_epsilon_from_D(cyl.D)
+                else:
+                    cyl.epsilon = input["geometry"]["epsilon"]
+        else:
+            with open(cyl.cyl_json_file, 'r') as json_handle:
+                input = json.load(json_handle)
+                cyl.D = input["geometry"]["taha"]["D"] # this is the D parameter in the Taha refining Kutta paper (see Eqs 8-9)
+                # cyl.epsilon = input["geometry"]["epsilon"]
+    if cyl.is_plot_circulation_for_varying_shape and not cyl.is_calc_circulation_for_varying_shape:
+        plt.figure()
+        # plot all of the files in the text_files/dsweep directory
+        file_location = "text_files/dsweep/"
+        filename_index = 0
+        for filename in os.listdir(file_location):
+            if filename.endswith(".txt"):
+                kutta_appellian_array = np.loadtxt(os.path.join(file_location, filename), delimiter=",", skiprows=1)
+                # if the file name ends with line_int.txt, make the label "Line Integral"
+                if filename.endswith("line_int.txt"):
+                    label = "Line Integral"
+                    linestyle = "solid"
+                else:
+                    label = "Area Integral"
+                    linestyle = "dashed"
+                appellian_array = np.loadtxt(os.path.join(file_location, filename), delimiter=",", skiprows=1)
+                if filename_index == 0:
+                    figure_name = cyl.plot_gamma_over_gamma_kutta(kutta_appellian_array, is_plot_current_D = False, kutta_and_current_D = [kutta_appellian_array[0,0], kutta_appellian_array[0,1]], label = label, linestyle = linestyle, is_first_file = True)
+                else:
+                    figure_name = cyl.plot_gamma_over_gamma_kutta(kutta_appellian_array, is_plot_current_D = False, kutta_and_current_D = [kutta_appellian_array[0,0], kutta_appellian_array[0,1]], label = label, linestyle = linestyle, is_first_file = False)
+                filename_index += 1
+        # kutta_appellian_txt_file = "text_files/dsweep/dsweep_zeta0_" + str(cyl.zeta_center.real) + "_" + str(cyl.zeta_center.imag) + "_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".txt"
+        # kutta_appellian_array = np.loadtxt(kutta_appellian_txt_file, delimiter=",", skiprows=1)
+        # figure_name = cyl.plot_gamma_over_gamma_kutta(kutta_appellian_array, is_plot_current_D = False, kutta_and_current_D = [kutta_appellian_array[0,0], kutta_appellian_array[0,1]])
+        # save
+        plt.legend()
+        plt.savefig(figure_name, dpi=300, bbox_inches=None, pad_inches=0)
+        print("Curvature sweep figure saved as:", figure_name)
+        plt.close()
     cyl.get_full_geometry_zeta()
     cyl.plot_geometry_zeta()
     cyl.get_full_geometry()
     cyl.plot_geometry()
+    if cyl.is_plot_shifted_joukowski_cylinder:
+        cyl.shift_joukowski_cylinder()
+        cyl.plot_shifted_joukowski_cylinder()
     zeta_trailing_edge_focus, zeta_leading_edge_focus, z_leading_edge_focus, z_trailing_edge_focus = cyl.get_and_plot_foci()
+    cyl.plot_geometry_settings()
+    if cyl.is_plot_z_selection_comparison:
+        plt.figure()
+        cyl.compare_correct_and_incorrect_z_selection()
     # zeta_to_z_test_point = 1 + 1j
     if cyl.type == "airfoil":
-        lift = cyl.calc_J_airfoil_CL()
-        print("CL Joukowski: ", lift)
-        Cmo = cyl.calc_J_airfoil_Cmz((0+1j*0))
-        print("Cm0 Joukowski: ", Cmo)
-        c4 = cyl.calc_J_airfoil_c4()
-        print("C4 location Joukowski: ", c4)
-        # now find the moment coefficient at c4
-        Cmc4 = cyl.calc_J_airfoil_Cmz(c4)
-        print("Cmc4 Joukowski: ", Cmc4)
-        # now create the full geometry of the airfoil and export it to a text file
-        cyl.output_J_airfoil()
-        print("\n")
-    if cyl.do_plot_streamlines:
+        cyl.run_J_airfoil_stuff()
+    if cyl.is_plot_streamlines:
+        plt.figure()
         cyl.plot()
-    # include y and x axes 
-    # plt.axhline(0, color='gray')
-    # plt.axvline(0, color='gray')
-    plt.gca().set_aspect('equal', adjustable='box')
-    plt.xlabel("$\\xi$/$R$")
-    plt.ylabel("$\\eta$/$R$")
-    plt.gca().xaxis.labelpad = 0.001
-    plt.gca().yaxis.labelpad = -10
-    plt.xlim(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim)
-    plt.ylim(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim)
-    x_tick_length = int(cyl.plot_x_upper_lim - cyl.plot_x_lower_lim)
-    y_tick_length = int(cyl.plot_x_upper_lim - cyl.plot_x_lower_lim)
-    x_ticks = np.linspace(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
-    y_ticks = np.linspace(cyl.plot_x_lower_lim, cyl.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
-    plt.xticks(x_ticks)
-    plt.yticks(y_ticks) 
-    plt.text(-0.07, -0.01, str(int(cyl.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-    epsilon_name = "epsilon_" + str(cyl.epsilon)
-    zeta_0_name = "zeta_0_" + str(cyl.zeta_center)
-    if cyl.plot_text:
-        plt.text(0.05, 0.92, "$\\epsilon = $" + str(cyl.epsilon) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-        plt.text(0.60, 0.96, "$\\xi_0 = $" + str(cyl.zeta_center.real) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-        plt.text(0.60, 0.88, "$\\eta_0 = $" + str(cyl.zeta_center.imag) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
-    if cyl.show_fig:
-        if cyl.type == "cylinder" and cyl.is_appellian and cyl.is_plot_appellian:
-            plt.scatter(xi_eta_vals[:, 0], xi_eta_vals[:, 1], color='red', s=5)
-            if cyl.save_fig:
-                plt.savefig("Joukowski_Cylinder_" + epsilon_name + "_" +  zeta_0_name + "_" + ".svg")
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.close()
+    if cyl.is_plot_z_plane_surface_pressure_distribution:
+        plt.figure()
+        cyl.plot_surface_pressures(cyl.circulation, cyl.D)
+        if cyl.is_pressure_alpha_considerations:
+            for i in range(len(cyl.alphas_for_consideration)):
+                cyl.angle_of_attack = cyl.alphas_for_consideration[i]
+                cyl.kutta_circulation = cyl.calc_circulation_J_airfoil()
+                appellian_circulation = cyl.run_appellian_roots(r_values, theta_values, cyl.D)[0]
+                cyl.circulation = appellian_circulation
+                cyl.plot_surface_pressures(cyl.circulation, cyl.D)
+        plt.legend()
+        if cyl.show_fig:
+            plt.show()
+        plt.close()
+    plt.close()
+    if cyl.is_create_dsweep_gif and cyl.is_calc_circulation_for_varying_shape:
         plt.show()
-    print("\n")
+        plt.figure()
+        cyl.create_dsweep_gif(kutta_appellian_array, r_values, theta_values)
+    
+    # if cyl.is_grid_plots:
+    #     plt.figure()
+    #     cyl.grid_plots()
 
-    # cyl.compare_correct_and_incorrect_z_selection()
-    # cyl.grid_plots()
+    # #run rb comparisons
+    if cyl.is_plot_rb_comparisons:
+        r_ranges = [cyl.cylinder_radius, 8*cyl.cylinder_radius, 0.01]
+        r_vals = hlp.list_to_range(r_ranges)
+        theta_ranges = [0, 2*np.pi, np.pi/1000]
+        theta_vals = hlp.list_to_range(theta_ranges) 
+        D = 0.0
+        r_range_first = [cyl.cylinder_radius, 1.0001*cyl.cylinder_radius, 0.0001*cyl.cylinder_radius]
+        r_values_first = hlp.list_to_range(r_range_first)
+        r_range_second = [1.05*cyl.cylinder_radius, 2.0*cyl.cylinder_radius, 0.05*cyl.cylinder_radius]
+        r_values_second = hlp.list_to_range(r_range_second)
+        r_range_third = [2.1*cyl.cylinder_radius, 2.9*cyl.cylinder_radius, 0.1*cyl.cylinder_radius]
+        r_values_third = hlp.list_to_range(r_range_third)
+        r_range_fourth = [3.0*cyl.cylinder_radius, 8.0*cyl.cylinder_radius, 1.0*cyl.cylinder_radius]
+        r_values_fourth = hlp.list_to_range(r_range_fourth)
+        r_values = np.concatenate((r_values_first, r_values_second, r_values_third, r_values_fourth), axis=0)
+        if cyl.is_calc_rb_comparisons:
+            r_range_first = [1.0*cyl.cylinder_radius, 1.0001*cyl.cylinder_radius, 1.0001*cyl.cylinder_radius]
+            r_values_first = hlp.list_to_range(r_range_first)
+            r_range_second = [1.0002*cyl.cylinder_radius, 8.0*cyl.cylinder_radius, 7.9998*cyl.cylinder_radius]
+            r_values_second = hlp.list_to_range(r_range_second)
+            r_values = np.concatenate((r_values_first, r_values_second), axis=0)
+            print("r_values: ", r_values)
+            D_array = np.array([0.6])
+            D_array = np.logspace(-2, 0, num=6)  # From 10^-2 (0.01) to 10^0 (1.0) in 6 steps (in a logarithmic scale)
+            for j in range(len(D_array)):
+                D = D_array[j]
+                cyl.run_r_b_comparisons(r_values, theta_values, D)
+                ### break
+        folder_name = "text_files"
+        file_name_array = []
+        for filename in os.listdir(folder_name):
+            if filename.endswith(".txt"):
+                file_path = os.path.join(folder_name, filename)
+                file_name_array.append(file_path)
+        # now plot the rb comparisons
+        cyl.plot_rb_comparisons(file_name_array)
+    
+    if cyl.is_calc_convergence_to_kutta:
+        print("r_values: ", r_values)
+        D_range_first = [0.0001, 0.00099, 0.00001]
+        D_values_first = hlp.list_to_range(D_range_first)
+        # D_range_second = [0.0001, 0.0009, 0.0001]
+        # D_values_second = hlp.list_to_range(D_range_second)
+        D_range_second = [0.001, 0.009, 0.001]
+        D_values_second = hlp.list_to_range(D_range_second)
+        D_range_third = [0.01, 0.1, 0.01]
+        D_values_third = hlp.list_to_range(D_range_third)
+        r_range = [1.0*cyl.cylinder_radius, 7*cyl.cylinder_radius, 0.01*cyl.cylinder_radius]
+        r_values = hlp.list_to_range(r_range)
+        D_values = np.concatenate((D_values_first, D_values_second, D_values_third), axis=0)
+        # instead, make D_values on a logarithmic scale from 0.0001 to 0.1
+        D_values = np.logspace(-4, -1, num=100)  # From 10^-4 (0.0001) to 10^-1 (0.1) in 6 steps (in a logarithmic scale)
+        # zeta_center_values = np.array([-0.05+0.0j])
+        # zeta_center_values = np.array([-0.1+0.0j])
+        # zeta_center_values = np.array([-0.15+0.0j])
+        zeta_center_values = np.array([-0.20 + 0.0j])
+        # zeta_center_values = np.array([-0.05+0.0j, -0.1+0.0j,-0.15+0.0j,-0.20 + 0.0j])
+        # zeta_center = cyl.zeta_center
+        for i in range(len(zeta_center_values)):
+            print("zeta center: ", zeta_center_values[i])
+            cyl.calc_convergence_to_kutta(D_values, r_values, theta_values, zeta_center_values[i])
+    if cyl.is_plot_convergence_to_kutta:
+        plt.figure()
+        folder_name = "text_files/convergence_to_kutta"
+        file_name_array = []
+        for filename in os.listdir(folder_name):
+            if filename.endswith(".txt"):
+                file_path = os.path.join(folder_name, filename)
+                file_name_array.append(file_path)
+        cyl.plot_convergence_to_kutta(file_name_array)
+        filename = "figures/convergence_to_kutta_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".pdf"
+        plt.savefig(filename, format='pdf', bbox_inches='tight')
+        print("Convergence to Kutta figure saved as:", filename)
 
-    test_point_in_z = [-25.5,25.5]
-    test_point_in_zeta = cyl.z_to_zeta(test_point_in_z[0] + 1j*test_point_in_z[1], cyl.epsilon)
+    # theta convergence
+    if cyl.is_calc_theta_convergence:
+        r_values = np.array([cyl.cylinder_radius])
+        D_values = np.logspace(-4, 0, num=6)  # From 10^-2 (0.01) to 10^0 (1.0) in 6 steps (in a logarithmic scale)
+        # D_values = np.array([0.0001])
+        # theta_steps = np.logspace(0, 4, num=100)  # From 10^1 (10) to 10^4 (10000) in 100 steps (in a logarithmic scale)
+        theta_steps = np.logspace(1, 4, num=100)  # From 10^1 (10) to 10^4 (10000) in 100 steps (in a logarithmic scale)
+        theta_range_array = np.zeros((len(theta_steps), 3))
+        for i in range(len(theta_steps)):
+            theta_range_array[i, 0] = 0.0
+            theta_range_array[i, 1] = 2*np.pi
+            theta_range_array[i, 2] = np.pi/theta_steps[i]
+        for i in range(len(D_values)):
+            # print("D value: ", D_values[i])
+            appellian_roots_theta_convergence = cyl.calc_theta_convergence(D_values[i], r_values, theta_range_array)
+    # # plot theta convergence
+    if cyl.is_plot_theta_convergence:
+        plt.figure()
+        folder_name = "text_files/theta_grid_convergence"
+        file_name_array = []
+        for filename in os.listdir(folder_name):
+            if filename.endswith(".txt"):
+                file_path = os.path.join(folder_name, filename)
+                file_name_array.append(file_path)
+        cyl.plot_theta_convergence(file_name_array)
+        # filename = "figures/theta_convergence_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".pdf"
+        # plt.savefig(filename, format='pdf', bbox_inches='tight')
+        # print("Theta convergence figure saved as:", filename)
+
+    # test the line integral convective acceleration
+    # print("circulation: ", cyl.circulation)
+    # cyl.numerically_integrate_appellian(cyl.circulation, r_values, cyl.D)
+
+    test_point_in_z = cyl.lower_coords[5]
+    # test_point_in_z = [0.5, 0.5]
+    test_point_in_zeta = cyl.Joukowski_z_to_zeta(test_point_in_z[0] + 1j*test_point_in_z[1], cyl.epsilon)
     test_point_in_Chi = cyl.zeta_to_Chi(test_point_in_zeta)
     r_chi, theta_chi = hlp.xy_to_r_theta(test_point_in_Chi.real, test_point_in_Chi.imag)
     r_0, theta_0 = hlp.xy_to_r_theta(cyl.zeta_center.real, cyl.zeta_center.imag)
     test_point_in_Chi = [test_point_in_Chi.real, test_point_in_Chi.imag]
+    test_point_in_zeta = [test_point_in_zeta.real, test_point_in_zeta.imag]
 
-    # conv_accel, conv_accel_comp_conj = conv_accel_using_comp_conj(cyl.circulation, r_chi, cyl.cylinder_radius, theta_chi, r_0, theta_0, cyl.freestream_velocity, cyl.epsilon, cyl.angle_of_attack)
-    # conv_accel_squared = conv_accel*conv_accel_comp_conj
-    # print("Analytic Convective Acceleration squared at Chi = ", test_point_in_Chi, " is ", conv_accel_squared)
-    # # cyl.is_z = False
-    # # cyl.is_chi = True
-    # # print("test point in chi:                                ", test_point_in_Chi)
-    # numerical_cartesian_convective_acceleration_in_chi = cyl.numerical_cartesian_convective_acceleration(test_point_in_Chi, cyl.circulation)
-    # # print("numerical_cartesian_convective_acceleration_in_chi: ", numerical_cartesian_convective_acceleration_in_chi)
-    # numerical_cartesian_convective_acceleration_in_chi_squared = np.dot(numerical_cartesian_convective_acceleration_in_chi, numerical_cartesian_convective_acceleration_in_chi)
-    # # print("Numerical Convective Acceleration squared at Chi =", test_point_in_Chi, " is  ", numerical_cartesian_convective_acceleration_in_chi_squared)
-    # # cyl.is_chi = False
-    # # cyl.is_z = True
-    # numerical_cartesian_convective_acceleration_in_z = cyl.numerical_cartesian_convective_acceleration(test_point_in_z, cyl.circulation, step=1e-6)
-    # # print("numerical_cartesian_convective_acceleration_in_z: ", numerical_cartesian_convective_acceleration_in_z)
-    # numerical_cartesian_convective_acceleration_in_z_squared = np.dot(numerical_cartesian_convective_acceleration_in_z, numerical_cartesian_convective_acceleration_in_z)
-    # print("Numerical Convective Acceleration squared at Z =            ", test_point_in_z, " is                     ", numerical_cartesian_convective_acceleration_in_z_squared)
-    # print("\n")
+    line_int_conv_accel_squared_comp_conj = cyl.analytic_conv_accel_for_line_int_comp_conj([r_chi, theta_chi], cyl.circulation)
+    print("Line Int Convective Acceleration squared is         ", r_chi*line_int_conv_accel_squared_comp_conj/(-32))
+    numerical_cartesian_convective_acceleration_in_z = cyl.numerical_cartesian_convective_acceleration(test_point_in_zeta, cyl.circulation, step=1e-12)
+    numerical_cartesian_convective_acceleration_in_z_squared = np.dot(numerical_cartesian_convective_acceleration_in_z, numerical_cartesian_convective_acceleration_in_z)
+    # print("Numerical Convective Acceleration squared is        ", numerical_cartesian_convective_acceleration_in_z_squared/2)
 
-    # convective_acceleration_squared_comp_conj = conv_accel_using_comp_conj_squared(cyl.circulation, r_chi, cyl.cylinder_radius, theta_chi, r_0, theta_0, cyl.freestream_velocity, cyl.epsilon, cyl.angle_of_attack)
-    # print("Analytic Convective Acceleration squared at Chi = ", test_point_in_Chi, " is ", convective_acceleration_squared_comp_conj)
-
-
-    # step = 1e-6
-    # Chi = test_point_in_Chi[0] + 1j*test_point_in_Chi[1]
-    # Chi_plus = Chi + step
-    # Chi_minus = Chi - step
-    # test_point_in_Chi_plus = [Chi_plus.real, Chi_plus.imag]
-    # test_point_in_Chi_minus = [Chi_minus.real, Chi_minus.imag]
-    # chi_velocity = cyl.velocity_chi(test_point_in_Chi, cyl.circulation)[0] + 1j*cyl.velocity_chi(test_point_in_Chi, cyl.circulation)[1]
-    # chi_velocity_plus = cyl.velocity_chi(test_point_in_Chi_plus, cyl.circulation)[0] + 1j*cyl.velocity_chi(test_point_in_Chi_plus, cyl.circulation)[1]
-    # chi_velocity_minus = cyl.velocity_chi(test_point_in_Chi_minus, cyl.circulation)[0] + 1j*cyl.velocity_chi(test_point_in_Chi_minus, cyl.circulation)[1]
-    # chi_acceleration = (chi_velocity_plus - chi_velocity_minus)/(2*step)
-    # # print("Chi Acceleration:                              ", chi_acceleration)
-    # chi_acceleration_for_reals = chi_velocity*chi_acceleration
-    # chi_acceleration_squared = chi_acceleration_for_reals*np.conj(chi_acceleration_for_reals)
-    # # print("Chi Acceleration squared:                                                                       ", chi_acceleration_squared)
-    # print("\n")
-
-    # D_range = [0, 1, 1]
-    # D_values = hlp.list_to_range(D_range)
-    # # make an array which contains zeros which is the length of D_values. The first column will be the D values and the second column will be the normalized gamma values
-    # normalized_gamma = np.zeros((len(D_values), 2))
-    # # Normalized_Gamma_wrt_D = np.zeros
-    # for i in tqdm(range(len(D_values)), desc="Calculating normalized Gamma wrt D"):
-    #     print("\nD VALUE", D_values[i])
-    #     cyl.epsilon = cyl.calc_epsilon_from_D(D_values[i])
-    #     appellian_roots, _ = cyl.run_appellian_stuff()
-    #     print("appellian roots: ", appellian_roots)
-    #     normalized_gamma[i, 0] = D_values[i]
-    #     normalized_gamma[i, 1] = appellian_roots/cyl.kutta_circulation
-    #     print("\n")
-    # plt.figure()
-    # plt.plot(normalized_gamma[:,0], normalized_gamma[:,1])
-    # plt.xlabel("$D$")
-    # plt.ylabel("$\\Gamma$/$\\Gamma_k$")
-    # # plt.xlim(0, 1.1)
-    # # plt.ylim(0, 1.1)
-    # plt.show()
-    # if cyl.save_fig:
-    #     plt.savefig("Normalized_Gamma_wrt_D_at_zeta0_is" +  str(cyl.zeta_center) + ".svg")
-
-
-    
-
-
-    
-
-
+    Taha_conv_accel_squared_comp_conj = cyl.taha_analytic_conv_accel_square_comp_conj([r_chi,theta_chi], cyl.circulation)
+    print("Taha Analytic Convective Acceleration squared is    ", Taha_conv_accel_squared_comp_conj/2)
+    Spencer_accel_squared_comp_conj = cyl.analytic_conv_accel_square_comp_conj([r_chi,theta_chi], cyl.circulation)
+    print("Spencer Alternat Convective Acceleration squared is ", Spencer_accel_squared_comp_conj/2)
+    print("\n")

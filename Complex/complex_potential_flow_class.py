@@ -222,8 +222,6 @@ class potential_flow_object:
                 point = point_new
                 if i > max_iter:
                     break
-            
-
         streamline_points = np.array(streamline_points)
         return streamline_points
     
@@ -241,18 +239,10 @@ class potential_flow_object:
             leading = self.x_leading_edge
             trailing = self.x_trailing_edge
             middle = leading + (trailing - leading) / 2
-            # print("\n")
-            # print("Leading edge of the cylinder", leading)
-            # print("Middle of the cylinder", middle)
-            # print("Trailing edge of the cylinder", trailing)
         else:
             leading = self.zeta_leading_intercept
             trailing = self.zeta_trailing_intercept
             middle = leading + (trailing - leading) / 2
-            # print("Leading edge of the airfoil", leading)
-            # print("Middle of the airfoil", middle)
-            # print("Trailing edge of the airfoil", trailing)
-            # print("\n")
         
         forward_stag = []
         aft_stag = []
@@ -377,7 +367,6 @@ class potential_flow_object:
 
     def plot_stagnation(self): 
         """This function plots the stagnation points on the geometry"""
-        # self.get_stagnation_streamlines()
         self.forward_stag_streamline = self.plot_streamline(self.forward_stag, -1)
         self.aft_stag_streamline = self.plot_streamline(self.aft_stag, 1)
     

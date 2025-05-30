@@ -641,6 +641,335 @@ class extras(potential_flow_object):
         # conv_accel_complex = np.linalg.norm(conv_accel_complex)
         return conv_accel_complex
     
+    def compare_correct_and_incorrect_z_selection(self):
+        """This function plots the zeta surface points using the correct and incorrect z selection methods"""
+        # first plot the correct zeta surface points
+        upper,lower,_= self.get_full_geometry()
+        upper_complex = upper[:,0] + 1j*upper[:,1] # the type of upper_complex is an array of complex numbers
+        lower_complex = lower[:,0] + 1j*lower[:,1] # the type of lower_complex is an array of complex numbers
+
+        upper_complex_zeta = np.zeros(len(upper_complex), dtype=complex)
+        lower_complex_zeta = np.zeros(len(lower_complex), dtype=complex)
+        upper_complex_zeta_incorrect = np.zeros(len(upper_complex), dtype=complex)
+        lower_complex_zeta_incorrect = np.zeros(len(lower_complex), dtype=complex)
+        for i in range(len(upper_complex)):
+            upper_complex_zeta[i] = self.z_to_zeta(upper_complex[i], self.epsilon)
+        for j in range(len(lower_complex)):
+            lower_complex_zeta[j] = self.z_to_zeta(lower_complex[j], self.epsilon)
+        for k in range(len(upper_complex)):
+            upper_complex_zeta_incorrect[k] = self.z_to_zeta_incorrect(upper_complex[k], self.epsilon)
+        for l in range(len(lower_complex)):
+            lower_complex_zeta_incorrect[l] = self.z_to_zeta_incorrect(lower_complex[l], self.epsilon)
+
+        # now create arrays that hold the real and imaginary parts as x and y components for the complex zeta coordinates for the correct and incorrect methods
+        upper_zeta = np.zeros((len(upper_complex_zeta), 2))
+        lower_zeta = np.zeros((len(lower_complex_zeta), 2))
+        upper_zeta_incorrect = np.zeros((len(upper_complex_zeta_incorrect), 2))
+        lower_zeta_incorrect = np.zeros((len(lower_complex_zeta_incorrect), 2))
+        for i in range(len(upper_complex_zeta)):
+            upper_zeta[i] = [upper_complex_zeta[i].real, upper_complex_zeta[i].imag]
+        for j in range(len(lower_complex_zeta)):
+            lower_zeta[j] = [lower_complex_zeta[j].real, lower_complex_zeta[j].imag]
+        for k in range(len(upper_complex_zeta_incorrect)):
+            upper_zeta_incorrect[k] = [upper_complex_zeta_incorrect[k].real, upper_complex_zeta_incorrect[k].imag]
+        for l in range(len(lower_complex_zeta_incorrect)):
+            lower_zeta_incorrect[l] = [lower_complex_zeta_incorrect[l].real, lower_complex_zeta_incorrect[l].imag]      
+        # now plot z, zeta, and zeta incorrect on the same plot
+        plt.figure()
+        plt.plot(upper[:,0], upper[:,1], label="$z$", color="black")
+        plt.plot(lower[:,0], lower[:,1], color="black")
+        plt.plot(upper_zeta[:,0], upper_zeta[:,1],linestyle="--", label="$\\zeta$", color="black")
+        plt.plot(lower_zeta[:,0], lower_zeta[:,1],linestyle="--", color="black")
+        plt.plot(upper_zeta_incorrect[:,0], upper_zeta_incorrect[:,1], label="$\\zeta$ incorrect", linestyle="dotted", color="black")
+        plt.plot(lower_zeta_incorrect[:,0], lower_zeta_incorrect[:,1], linestyle="dotted", color="black")
+        # plt.axhline(0, color='gray')
+        # plt.axvline(0, color='gray')
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.xlabel("$\\xi$/$R$")
+        plt.ylabel("$\\eta$/$R$")
+        plt.gca().xaxis.labelpad = 0.001
+        plt.gca().yaxis.labelpad = -10
+        plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
+        plt.ylim(self.plot_x_lower_lim, self.plot_x_upper_lim)
+        x_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
+        y_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
+        x_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
+        y_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
+        plt.xticks(x_ticks)
+        plt.yticks(y_ticks) 
+        plt.text(-0.07, -0.01, str(int(self.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
+        if self.plot_text:
+            plt.text(0.05, 0.92, "$\\epsilon = $" + str(self.epsilon) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
+            plt.text(0.60, 0.96, "$\\xi_0 = $" + str(self.zeta_center.real) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
+            plt.text(0.60, 0.88, "$\\eta_0 = $" + str(self.zeta_center.imag) + " $R$", transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
+        # plt.legend(fontsize=12.0, loc="lower right")
+        plt.show()
+
+    def calc_Chi_G_values(self, r, theta, alpha, epsilon, R, r0, theta0):
+        """takes in r, theta, alpha, epsilon, R, r0, theta0 and calculates the G values"""
+        G1 = np.sin(theta)/r
+        G2 = np.cos(theta)/r
+        G3 = R**2*np.cos(alpha-2*theta)/r**2
+        G4 = R**2*np.sin(alpha-2*theta)/r**2
+        G5 = 1 - ((R-epsilon)**2*(r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2)
+        G6 = ((R-epsilon)**2*(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0)))/((r**2*np.cos(2*theta)+r0**2*np.cos(2*theta0)+2*r*r0*np.cos(theta+theta0))**2+(r**2*np.sin(2*theta)+r0**2*np.sin(2*theta0)+2*r*r0*np.sin(theta+theta0))**2)
+        return G1, G2, G3, G4, G5, G6
+    
+    def z_analytic_acceleration(self, point_xi_eta_in_z_plane, Gamma):
+        """This function also calculates the acceleration at a given point in the flow field in the z plane according"""
+        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
+        zeta = self.z_to_zeta(z, self.epsilon)
+        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        plus = (z + np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+        minus = (z - np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+        if zeta == plus:
+            dzeta_dz_squared = (z+1)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
+            d2zeta_dz2 = -(2*(R-epsilon)**2)/(z**2-4*(R-epsilon)**2)**(3/2)
+        elif zeta == minus:
+            dzeta_dz_squared = (1-z)/(4*(2*epsilon-2*R+z)*(2*R-2*epsilon+z))
+            d2zeta_dz2 = (2*(R-epsilon)**2)/(z**2-4*(R-epsilon)**2)**(3/2)
+        acceleration_1 = V_inf*(-1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)**2) + 2*np.exp(1j*alpha)*R**2/((zeta-zeta0)**3))*dzeta_dz_squared
+        acceleration_2 = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2)*d2zeta_dz2
+        acceleration = acceleration_1 + acceleration_2
+        # acceleration *= 2*V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2) / (1 - (R-epsilon)**2/(zeta)**2)
+        acceleration_complex = np.array([acceleration.real, -acceleration.imag])
+        theta = np.arctan2(point_xi_eta_in_z_plane[1], point_xi_eta_in_z_plane[0])
+        polar_acceleration = hlp.polar_vector(theta, acceleration_complex)
+        return polar_acceleration
+    
+    def z_to_zeta_incorrect(self, z: complex, epsilon: float):
+        """This function returns the opposite root that z_to_zeta returns"""
+        zeta_correct = self.z_to_zeta(z, epsilon)
+        z_1 = z**2 - 4*(self.cylinder_radius - epsilon)**2
+        zeta_option_1 = (z + np.sqrt(z_1))/2
+        zeta_option_2 = (z - np.sqrt(z_1))/2
+        # check if the zeta coordinate is the same as either of the options
+        if np.isclose(zeta_correct, zeta_option_1):
+            zeta = zeta_option_2
+        elif np.isclose(zeta_correct, zeta_option_2):
+            zeta = zeta_option_1
+        else:
+            raise ValueError("The zeta coordinate does not match either of the options")
+        return zeta
+    
+    def r_theta_Chi_to_r_theta_zeta(self, r_Chi, theta_Chi):
+        """This function takes in r and theta in the Chi plane and returns r and theta in the zeta plane"""
+        xi_Chi, eta_Chi = hlp.r_theta_to_xy(r_Chi, theta_Chi)
+        xi_zeta, eta_zeta = xi_Chi + self.zeta_center.real, eta_Chi + self.zeta_center.imag
+        r_zeta, theta_zeta = hlp.xy_to_r_theta(xi_zeta, eta_zeta)
+        return r_zeta, theta_zeta
+    
+    def r_theta_zeta_to_r_theta_z(self, r_zeta, theta_zeta):
+        """This function takes in r and theta in the zeta plane and returns r and theta in the z plane"""
+        xi_zeta, eta_zeta = hlp.r_theta_to_xy(r_zeta, theta_zeta)
+        point_xi_eta_in_zeta = xi_zeta + 1j*eta_zeta
+        z = self.Joukowski_zeta_to_z(point_xi_eta_in_zeta, self.epsilon)
+        r_z, theta_z = hlp.xy_to_r_theta(z.real, z.imag)
+        return r_z, theta_z
+    
+    def velocity_chi(self, point_xy_in_Chi_plane, Gamma):
+        """Start with a Chi value that is shifted from zeta_center"""
+        xi, eta = point_xy_in_Chi_plane[0], point_xy_in_Chi_plane[1]
+        zeta0 = self.zeta_center
+        Chi = xi + 1j*eta
+        zeta = Chi + zeta0
+        r, theta = hlp.xy_to_r_theta(xi, eta)
+        zeta_center = self.zeta_center
+        # xio, etao = zeta_center.real, zeta_center.imag
+        # r0, theta0 = hlp.xy_to_r_theta(xio, etao)
+        V_inf, R, alpha, epsilon = self.freestream_velocity, self.cylinder_radius, self.angle_of_attack, self.epsilon
+        # G1, G2, G3, G4, G5, G6 = self.calc_Chi_G_values(r, theta, alpha, epsilon, R, r0, theta0)
+        # V_real = (Gamma/(2*np.pi))*((G1*G5+G2*G6)/(G5**2 + G6**2)) + V_inf*((G5*np.cos(alpha)-G6*np.sin(alpha)-G3*G5-G4*G6)/(G5**2 + G6**2))
+        # V_imag = (-1*Gamma/(2*np.pi))*((G2*G5-G1*G6)/(G5**2 + G6**2)) + V_inf*((G6*np.cos(alpha)+G5*np.sin(alpha)+G4*G5-G3*G6)/(G5**2 + G6**2))
+        # velocity_complex = np.array([V_real, V_imag])
+        velocity = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(Chi)) - np.exp(1j*alpha)*R**2/(Chi)**2) / (1 - (R-epsilon)**2/(Chi+zeta0)**2) # eq 107
+        velocity_complex = np.array([velocity.real, -velocity.imag])
+        return velocity_complex
+    
+    def d2phi_dzeta2(self, point_r_theta_in_Chi, Gamma):
+        V_inf, epsilon, R, alpha, zeta_0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        xi_0, eta_0 = zeta_0.real, zeta_0.imag
+        r_0, theta_0 = hlp.xy_to_r_theta(xi_0, eta_0)
+        r, theta = point_r_theta_in_Chi[0], point_r_theta_in_Chi[1]
+        d2phi_dzeta2 = V_inf*(-1j*Gamma/(2*np.pi*V_inf*(r*np.exp(1j*theta))**2) + 2*np.exp(1j*alpha)*R**2/((r*np.exp(1j*theta))**3))
+        d2phi_dzeta2_comp_conj = np.conj(d2phi_dzeta2)
+        d2phi_dzeta2_squared = d2phi_dzeta2 * d2phi_dzeta2_comp_conj
+        # print("d2phi_dzeta2\n", d2phi_dzeta2_squared)
+        return d2phi_dzeta2_squared
+    
+    def grid_plots(self):
+        # Reset the plot settings
+        cyl.reset_plot_stuff()
+
+        # Parameters for the polar grid
+        R = cyl.cylinder_radius  # Cylinder radius
+        zeta_center = cyl.zeta_center  # Center of the cylinder in the zeta plane
+        theta_increment = np.pi / 32  # Spacing between radial lines
+        r_increment = 0.1 * R  # Increment for radial spacing
+        max_radius = 6.0 * R  # Maximum radius for the grid
+
+        # Generate theta and r values
+        theta_vals = np.arange(0, 2 * np.pi, theta_increment)  # Angles for radial lines
+        r_vals = np.arange(R, max_radius + r_increment, r_increment)  # Radii for circular lines
+
+        # Arrays to store the lines
+        radial_lines = []
+        circular_lines = []
+
+        # Create radial lines in the zeta plane
+        for theta in theta_vals:
+            line = np.array([[zeta_center.real + r * np.cos(theta), zeta_center.imag + r * np.sin(theta)] for r in np.linspace(r_vals[0], r_vals[-1], 1000)])  # Offset by zeta_center
+            radial_lines.append(line)  # Save the line
+            plt.plot(line[:, 0], line[:, 1], color='black')  # Plot the radial line
+
+        # Create circular lines in the zeta plane
+        for r in r_vals:
+            line = np.array([[zeta_center.real + r * np.cos(theta), zeta_center.imag + r * np.sin(theta)] for theta in np.linspace(0, 2 * np.pi, 1000)])  # Offset by zeta_center
+            circular_lines.append(line)  # Save the line
+            plt.plot(line[:, 0], line[:, 1], color='black')  # Plot the circular line
+
+        # Plot the geometry of the circular cylinder in the zeta plane
+        plt.plot(cyl.upper_zeta_coords[:, 0], cyl.upper_zeta_coords[:, 1], color='black')
+        plt.plot(cyl.lower_zeta_coords[:, 0], cyl.lower_zeta_coords[:, 1], color='black')
+
+        # plt.show()
+
+        # Transform the grid to the z-plane
+        plt.figure()
+        cyl.reset_plot_stuff()
+
+        # Arrays to store the transformed lines
+        transformed_radial_lines = []
+        transformed_circular_lines = []
+
+        # Transform radial lines to the z-plane
+        for line in radial_lines:
+            transformed_line = []
+            for point in line:
+                zeta = point[0] + 1j * point[1]  # Convert to complex zeta
+                z = cyl.zeta_to_z(zeta, cyl.epsilon)  # Transform to z-plane
+                transformed_line.append([z.real, z.imag])  # Store the transformed point
+            transformed_line = np.array(transformed_line)  # Convert to numpy array
+            transformed_radial_lines.append(transformed_line)  # Save the transformed line
+            plt.plot(transformed_line[:, 0], transformed_line[:, 1], color='black')  # Plot the transformed radial line
+
+        # Transform circular lines to the z-plane
+        for line in circular_lines:
+            transformed_line = []
+            for point in line:
+                zeta = point[0] + 1j * point[1]  # Convert to complex zeta
+                z = cyl.zeta_to_z(zeta, cyl.epsilon)  # Transform to z-plane
+                transformed_line.append([z.real, z.imag])  # Store the transformed point
+            transformed_line = np.array(transformed_line)  # Convert to numpy array
+            transformed_circular_lines.append(transformed_line)  # Save the transformed line
+            plt.plot(transformed_line[:, 0], transformed_line[:, 1], color='black')  # Plot the transformed circular line
+
+        # Plot the geometry of the shape in the z-plane
+        plt.plot(cyl.upper_coords[:, 0], cyl.upper_coords[:, 1], color='black')
+        plt.plot(cyl.lower_coords[:, 0], cyl.lower_coords[:, 1], color='black')
+
+        plt.show()
+
+    def reset_plot_stuff(self):
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.xlabel("$\\xi$/$R$")
+        plt.ylabel("$\\eta$/$R$")
+        plt.gca().xaxis.labelpad = 0.001
+        plt.gca().yaxis.labelpad = -10
+        plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
+        plt.ylim(self.plot_x_lower_lim, self.plot_x_upper_lim)
+        x_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
+        y_tick_length = int(self.plot_x_upper_lim - self.plot_x_lower_lim)
+        x_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, x_tick_length + 1)[1:] # ticks everywhere except for the first element
+        y_ticks = np.linspace(self.plot_x_lower_lim, self.plot_x_upper_lim, y_tick_length + 1)[1:] # ticks everywhere except for the first element
+        plt.xticks(x_ticks)
+        plt.yticks(y_ticks) 
+        plt.text(-0.07, -0.01, str(int(self.plot_x_lower_lim)), transform=plt.gca().transAxes, fontsize=17, verticalalignment='top')
+
+    def analytic_conv_accel_square_comp_conj_wiki(self, point_r_theta_chi, Gamma):
+        """This function calculates the pressure gradient at a given point in the flow field in the z plane"""
+        point_xi_eta_chi = hlp.r_theta_to_xy(point_r_theta_chi[0], point_r_theta_chi[1])
+        Chi = point_xi_eta_chi[0] + 1j*point_xi_eta_chi[1]
+        zeta = self.Chi_to_zeta(Chi)
+        z = self.zeta_to_z(zeta, self.epsilon)
+        V_inf, epsilon, R, alpha, zeta0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        plus = (z + np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+        minus = (z - np.sqrt(z**2 - 4*(R-epsilon)**2))/2
+        omega_z = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2) / (1 - (R-epsilon)**2/(zeta)**2)
+        dPhi_dzeta = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)) - np.exp(1j*alpha)*R**2/(zeta-zeta0)**2)
+        d2Phi_dzeta2 = V_inf*(-1j*Gamma/(2*np.pi*V_inf*(zeta-zeta0)**2) + 2*np.exp(1j*alpha)*R**2/((zeta-zeta0)**3))
+        if np.isclose(zeta, plus, atol=1e-10):
+            dzeta_dz_squared = ((1/2)+(z)/(2*np.sqrt(z**2-4*(R-epsilon)**2)))**2
+            d2zeta_dz2 = -(2*(R-epsilon)**2)/(z**2-4*(R-epsilon)**2)**(3/2)
+        elif np.isclose(zeta, minus, atol=1e-10):
+            dzeta_dz_squared = ((1/2)-(z)/(2*np.sqrt(z**2-4*(R-epsilon)**2)))**2
+            d2zeta_dz2 = (2*(R-epsilon)**2)/(z**2-4*(R-epsilon)**2)**(3/2)
+        else:
+            print("zeta: ", zeta)
+            print("plus: ", plus)
+            print("minus: ", minus)
+            raise ValueError("zeta is not equal to plus or minus")
+        convective_acceleration = omega_z*(d2Phi_dzeta2*dzeta_dz_squared + dPhi_dzeta*d2zeta_dz2)
+        convective_acceleration_comp_conj = np.conj(convective_acceleration)
+        convective_acceleration_squared = convective_acceleration * convective_acceleration_comp_conj
+        return np.real(convective_acceleration_squared)
+    
+    def taha_analytic_conv_accel_square_comp_conj(self, point_r_theta_in_Chi, Gamma): # need to adjust so that it uses the Taha transformation
+        """This function calculates the pressure gradient at a given point in the flow field in the z plane"""
+        V_inf, epsilon, R, alpha, zeta_0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        xi_0, eta_0 = zeta_0.real, zeta_0.imag
+        r_0, theta_0 = hlp.xy_to_r_theta(xi_0, eta_0)
+        r, theta = point_r_theta_in_Chi[0], point_r_theta_in_Chi[1]
+        xi_chi, eta_chi = hlp.r_theta_to_xy(r, theta)
+        chi = xi_chi + 1j*eta_chi
+        zeta = self.Chi_to_zeta(chi)
+        G_of_zeta = 1/(1-(R-epsilon)**2/(r*np.exp(1j*theta)+r_0*np.exp(1j*theta_0))**2)
+        # G_of_zeta = 1/self.zeta_to_z(zeta)
+        G_of_zeta_comp_conj = np.conj(G_of_zeta)
+        G_of_zeta_squared = G_of_zeta * G_of_zeta_comp_conj
+        # derivative of G with respect to zeta
+        dG_dzeta = 4
+        dG_dzeta_comp_conj = np.conj(dG_dzeta)
+        omega_of_zeta = V_inf*(np.exp(-1j*alpha) + 1j*Gamma/(2*np.pi*V_inf*(r*np.exp(1j*theta))) - np.exp(1j*alpha)*R**2/(r*np.exp(1j*theta))**2)
+        omega_of_zeta_comp_conj = np.conj(omega_of_zeta)
+        omega_of_zeta_squared = omega_of_zeta * omega_of_zeta_comp_conj 
+        d_omega_of_zeta_dzeta = V_inf*(-1j*Gamma/(2*np.pi*V_inf*(r*np.exp(1j*theta))**2) + 2*np.exp(1j*alpha)*R**2/((r*np.exp(1j*theta))**3))
+        d_omega_of_zeta_dzeta_comp_conj = np.conj(d_omega_of_zeta_dzeta)
+        a_of_zeta = omega_of_zeta*d_omega_of_zeta_dzeta_comp_conj
+        integrand = G_of_zeta_squared * (G_of_zeta_comp_conj * a_of_zeta + omega_of_zeta_squared*dG_dzeta_comp_conj)
+        integrand_comp_conj = np.conj(integrand)
+        conv_accel_squared = integrand * integrand_comp_conj
+        # self.tau = 0.1
+        # self.epsilon = self.calc_taha_epsilon_from_tau()
+        # self.C = self.calc_taha_C_from_epsilon()
+        return np.real(conv_accel_squared)
+    
+    def analytic_conv_accel_for_line_int_comp_conj(self, point_r_theta_in_Chi, Gamma, step = 1e-14):
+        """"""
+        V_inf, epsilon, R, alpha, zeta_0 = self.freestream_velocity, self.epsilon, self.cylinder_radius, self.angle_of_attack, self.zeta_center
+        r, theta = point_r_theta_in_Chi[0], point_r_theta_in_Chi[1]
+        xi_Chi, eta_Chi = hlp.r_theta_to_xy(r, theta)
+        Chi = xi_Chi + 1j*eta_Chi
+        r_0, theta_0 = hlp.xy_to_r_theta(zeta_0.real, zeta_0.imag)
+        A = Gamma/(2*np.pi*V_inf)
+        B = R**2
+        C = (R-epsilon)**2
+        conv_accel_squared = ((np.exp(-alpha*1j)+(A*np.exp(-theta*1j)*1j)/r - (B*np.exp(alpha*1j)*np.exp(-theta*2*1j))/r**2)**2*(- np.exp(alpha*1j)+(A*np.exp(theta*1j)*1j)/r \
+                            + (B*np.exp(-alpha*1j)*np.exp(theta*2*1j))/r**2)**2)/((C/(r*np.exp(-theta*1j) + r_0*np.exp(-theta_0*1j))**2 - 1)**2*(C/(r*np.exp(theta*1j) + \
+                            r_0*np.exp(theta_0*1j))**2 - 1)**2) - (2*r*((A*np.exp(-theta*1j)*1j)/r**2 - (2*B*np.exp(alpha*1j)*np.exp(-theta*2*1j))/r**3)*(np.exp(-alpha*1j) + \
+                            (A*np.exp(-theta*1j)*1j)/r - (B*np.exp(alpha*1j)*np.exp(-theta*2*1j))/r**2)*(- np.exp(alpha*1j) + (A*np.exp(theta*1j)*1j)/r + (B*np.exp(-alpha*1j)* \
+                            np.exp(theta*2*1j))/r**2)**2)/((C/(r*np.exp(-theta*1j) + r_0*np.exp(-theta_0*1j))**2 - 1)**2*(C/(r*np.exp(theta*1j) + r_0*np.exp(theta_0*1j))**2 - 1)**2) -\
+                            (2*r*((A*np.exp(theta*1j)*1j)/r**2 + (2*B*np.exp(-alpha*1j)*np.exp(theta*2*1j))/r**3)*(np.exp(-alpha*1j) + (A*np.exp(-theta*1j)*1j)/r - (B*np.exp(alpha*1j)*\
+                            np.exp(-theta*2*1j))/r**2)**2*(- np.exp(alpha*1j) + (A*np.exp(theta*1j)*1j)/r + (B*np.exp(-alpha*1j)*np.exp(theta*2*1j))/r**2))/((C/(r*np.exp(-theta*1j) + \
+                            r_0*np.exp(-theta_0*1j))**2 - 1)**2*(C/(r*np.exp(theta*1j) + r_0*np.exp(theta_0*1j))**2 - 1)**2) + (4*C*r*np.exp(-theta*1j)*(np.exp(-alpha*1j) + (A*np.exp(-theta*1j)*1j)/r \
+                            - (B*np.exp(alpha*1j)*np.exp(-theta*2*1j))/r**2)**2*(- np.exp(alpha*1j) + (A*np.exp(theta*1j)*1j)/r + (B*np.exp(-alpha*1j)*np.exp(theta*2*1j))/r**2)**2)/((r*np.exp(-theta*1j) \
+                            + r_0*np.exp(-theta_0*1j))**3*(C/(r*np.exp(-theta*1j) + r_0*np.exp(-theta_0*1j))**2 - 1)**3*(C/(r*np.exp(theta*1j) + r_0*np.exp(theta_0*1j))**2 - 1)**2) + \
+                            (4*C*r*np.exp(theta*1j)*(np.exp(-alpha*1j) + (A*np.exp(-theta*1j)*1j)/r - (B*np.exp(alpha*1j)*np.exp(-theta*2*1j))/r**2)**2*(- np.exp(alpha*1j) + (A*np.exp(theta*1j)*1j)/r \
+                            + (B*np.exp(-alpha*1j)*np.exp(theta*2*1j))/r**2)**2)/((r*np.exp(theta*1j) + r_0*np.exp(theta_0*1j))**3*(C/(r*np.exp(-theta*1j) + r_0*np.exp(-theta_0*1j))**2 - 1)**2*\
+                            (C/(r*np.exp(theta*1j) + r_0*np.exp(theta_0*1j))**2 - 1)**3)
+        # print("conv_accel_squared", conv_accel_squared)
+        return np.real(conv_accel_squared)
+
     if __name__ == "__main__":
         four = 4 # placeholder 
         # zeta_test = 4 - 1j*4
@@ -662,3 +991,48 @@ class extras(potential_flow_object):
         # z_polar = hlp.polar_vector(theta_zeta, z_velocity_at_z_test)
         # # Chi_polar = hlp.polar_vector(theta_chi, velocity_chi_at_chi_test)
         # z_polar_mag = np.sqrt(z_polar[0]**2 + z_polar[1]**2)
+        
+        # diffs between acceleration methods
+            # counter = 0
+    # decimal_places = 14
+    # num_points = len(r_vals) * len(theta_vals)
+    # tolerance = 10**-decimal_places  # Absolute tolerance for comparison
+    # print("Number of points to be compared: ", num_points)
+    # print("Comparison out to " + str(decimal_places) + " decimal places")
+            # for i in range(len(r_vals)):
+    #     for j in range(len(theta_vals)):
+    #         conv_accel_squared_comp_conj = cyl.taha_analytic_conv_accel_square_comp_conj([r_vals[i], theta_vals[j]], cyl.circulation)
+    #         alternative_accel_squared_comp_conj = cyl.analytic_conv_accel_square_comp_conj([r_vals[i], theta_vals[j]], cyl.circulation)
+            
+    #         # Check if the values are equal within the specified decimal places
+    #         if not np.isclose(conv_accel_squared_comp_conj, alternative_accel_squared_comp_conj, atol=tolerance): # atol is the absolute tolerance which is calculated as atol = alt
+    #             # compare the absolute tolerance to the result
+    #             # print("conv_accel_squared_comp_conj: ", conv_accel_squared_comp_conj)
+    #             # print("alternative_accel_squared_comp_conj: ", alternative_accel_squared_comp_conj)
+    #             # print("Difference: ", abs(conv_accel_squared_comp_conj - alternative_accel_squared_comp_conj))
+                
+    #             print("Conv Accel Squared Comp Conj:        ", conv_accel_squared_comp_conj)
+    #             print("Alternative Accel Squared Comp Conj: ", alternative_accel_squared_comp_conj)
+    #             print("r_vals[i]: ", r_vals[i])
+    #             print("theta_vals[j]: ", theta_vals[j])
+    #             print("\n")
+    #             counter += 1
+
+    # print("counter: ", counter)
+    # if counter == 0:
+    #     print("All values are equal between the two acceleration methods out to " + str(decimal_places) + " decimal places")
+
+    # diffs between S values
+        # print("\n")
+    # r_range = [cyl.cylinder_radius, 8*cyl.cylinder_radius, 0.01]
+    # r_vals = hlp.list_to_range(r_range)
+    # theta_range = [0, 2*np.pi, np.pi/1000]
+    # theta_vals = hlp.list_to_range(theta_range)
+    # Gamma = 0.376992934959691
+    # S = cyl.numerically_integrate_appellian(Gamma, r_vals, theta_vals)
+    # print("Gamma: ", Gamma)
+    # print("r_end: ", r_range[1])
+    # print("r_step: ", r_range[2])
+    # print("theta_step: ", theta_range[2])
+    # print("S: ", S)
+    # print("\n")
