@@ -21,7 +21,8 @@ class cylinder(potential_flow_object):
     def __init__(self, json_file):
         self.cyl_json_file = json_file
         self.parse_cylinder_json()
-        super().__init__(json_file) # this is doing self.() of all the variables we want to in the super class
+        # print("MRO:", [cls.__name__ for cls in self.__class__.mro()])
+        potential_flow_object.__init__(self, json_file) # this is doing self.() of all the variables we want to in the super class
 
     def parse_cylinder_json(self):
         """This function reads the json file and stores the cylinder specific data in a dictionary"""
@@ -29,9 +30,13 @@ class cylinder(potential_flow_object):
             input = json.load(json_handle)
             print("\n")
             # use the parse_dictionary_or_return_default function from the helper file to get the values from the json file. the function inputs are as follows: parse_dictionary_or_return_default(input, ["section", "key"], default_value)
-            self.use_shape_parameter_D = hlp.parse_dictionary_or_return_default(input, ["geometry", "use_shape_parameter_D"], False)
-            self.dtheta = np.pi/hlp.parse_dictionary_or_return_default(input, ["appellian", "dtheta_(num_to_divide_pi_by)"], 1000)
-            self.is_plot_shifted_joukowski_cylinder = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_shifted_joukowski_cylinder"], False)
+            # appellian stuff
+            self.is_compute_appellian = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_compute_appellian"], False)
+            self.is_plot_appellian = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_appellian"], False)
+            self.is_plot_appellian_for_varying_circulation = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_appellian_for_varying_circulation"], False)
+            self.is_calc_circulation_for_varying_shape = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_circulation_for_varying_shape"], False)
+            self.is_plot_circulation_for_varying_shape = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_circulation_for_varying_shape"], False)
+            self.dtheta = 2*np.pi/hlp.parse_dictionary_or_return_default(input, ["appellian", "num_theta_steps"], 1000)
             self.is_calc_rb_comparisons = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_rb_comparisons"], False)
             self.is_plot_rb_comparisons = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_rb_comparisons"], False)
             self.is_calc_convergence_to_kutta = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_convergence_to_kutta"], False)
@@ -40,19 +45,13 @@ class cylinder(potential_flow_object):
             self.is_plot_theta_convergence = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_theta_convergence"], False)
             self.is_calc_r_convergence = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_r_convergence"], False)
             self.is_plot_r_convergence = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_r_convergence"], False)
-            self.D = hlp.parse_dictionary_or_return_default(input, ["geometry", "shape_parameter_D"], 1.0)
-            self.is_compute_appellian = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_compute_appellian"], False)
-            self.is_calc_circulation_for_varying_shape = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_circulation_for_varying_shape"], False)
-            self.is_plot_circulation_for_varying_shape = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_circulation_for_varying_shape"], False)
-            self.appellian_is_area_integral = hlp.parse_dictionary_or_return_default(input, ["appellian", "appellian_is_area_integral"], False)
             self.appellian_is_line_integral = hlp.parse_dictionary_or_return_default(input, ["appellian", "appellian_is_line_integral"], True)
-            if self.appellian_is_area_integral and self.appellian_is_line_integral:
+            if self.appellian_is_line_integral:
                 self.appellian_is_area_integral = False
-                print("Warning: Both area and line integrals are set to True. Setting area integral to False.")
+            else:
+                self.appellian_is_area_integral = True
             self.appellian_minimization_method = hlp.parse_dictionary_or_return_default(input, ["appellian", "appellian_minimization_method"], "roots_of_derive_of_poly_fit")
             self.polynomial_order = hlp.parse_dictionary_or_return_default(input, ["appellian", "polynomial_order"], 4)
-            self.is_plot_appellian = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_appellian"], False)
-            self.is_plot_appellian_for_varying_circulation = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_appellian_for_varying_circulation"], False)
             self.is_calc_D_sweep_alpha_considerations = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_D_sweep_alpha_considerations"], False)
             self.is_plot_D_sweep_alpha_considerations = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_D_sweep_alpha_considerations"], False)
             self.is_calc_z_plane_surface_pressure_distribution = hlp.parse_dictionary_or_return_default(input, ["appellian", "is_calc_z_plane_surface_pressure_distribution"], False) ######### go through and make this happen! Currently the calculating is tied to the plotting
@@ -62,9 +61,14 @@ class cylinder(potential_flow_object):
             self.alphas_for_consideration = hlp.parse_dictionary_or_return_default(input, ["plot", "alphas_for_consideration"], [5.0, 15.0])
             for i in range(len(self.alphas_for_consideration)):
                 self.alphas_for_consideration[i] = np.radians(self.alphas_for_consideration[i])
+            self.is_create_dsweep_gif = hlp.parse_dictionary_or_return_default(input, ["plot", "is_create_dsweep_gif"], False)
+
+            self.use_shape_parameter_D = hlp.parse_dictionary_or_return_default(input, ["geometry", "use_shape_parameter_D"], False)
+            self.is_plot_shifted_joukowski_cylinder = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_shifted_joukowski_cylinder"], False)
+            self.D = hlp.parse_dictionary_or_return_default(input, ["geometry", "shape_parameter_D"], 1.0)
             self.save_fig = hlp.parse_dictionary_or_return_default(input, ["plot", "save_fig"], False)
             self.show_fig = hlp.parse_dictionary_or_return_default(input, ["plot", "show_fig"], False)
-            self.is_create_dsweep_gif = hlp.parse_dictionary_or_return_default(input, ["plot", "is_create_dsweep_gif"], False)
+
             self.is_plot_z_selection_comparison = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_z_selection_comparison"], False)
             self.is_plot_streamlines = hlp.parse_dictionary_or_return_default(input, ["plot", "is_plot_streamlines"], False)
             self.cylinder_radius = hlp.parse_dictionary_or_return_default(input, ["geometry", "cylinder_radius"], 1.0) # this is the radius of the cylinder. We are normalizing everything by this value. This is used in the geometry function to calculate the geometry of the cylinder.
@@ -191,44 +195,31 @@ class cylinder(potential_flow_object):
         # shift the coordinates to the center of the cylinder based on zeta_center
         return [upper.real, upper.imag], [lower.real, lower.imag], [camber.real, camber.imag]
 
-    def get_full_geometry_zeta(self, number_of_panel_method_points = 10, theta_offset = 0.3):
+    def get_full_geometry_zeta(self, number_of_points: int = 10, theta_offset: float = 0.0):
         """This function calls the geometry function across every point on the cylinder"""
-        # create an empty array for the upper and lower surfaces and camber 
-        n = 1000
-        upper = np.zeros((n,2))
-        lower = np.zeros((n,2))
-        camber = np.zeros((n,2))
-        x_coords = np.linspace(self.x_leading_edge, self.x_trailing_edge, n) # this is creating an array of x coordinates
-        for i in range(n):
-            upper[i], lower[i], camber[i] = self.geometry_zeta(np.real(x_coords[i]))
-            # print("upper", upper[i], "lower", lower[i])
-        self.upper_zeta_coords = upper
-        self.lower_zeta_coords = lower
-        self.camber_zeta_coords = camber
-        # now space 10 points evenly in theta around the cylinder
-        N = number_of_panel_method_points
-        theta_coords = np.linspace(0.0-theta_offset, 2*np.pi-theta_offset, N) # this is creating an array of theta coordinates
-        # theta_coords = np.linspace(0.0, 2*np.pi, N) # this is creating an array of theta coordinates
-        zeta_array = np.zeros(N, dtype=complex)
-        z_array = np.zeros((N+1, 2))
+        if self.type == "airfoil" and self.output_points <= 3:
+            # raise value error if the number of points is less than or equal to  3
+            print("\n")
+            raise ValueError("The number of points must be greater than 3")
+        elif self.type == "airfoil" and self.output_points > 3:
+            number_of_points = self.output_points//2 
+        else:
+            number_of_points = number_of_points
+        N = number_of_points
+        theta_coords = np.linspace(2*np.pi-theta_offset, 0.0-theta_offset, N) # this is creating an array of theta coordinates
+        zeta_array = np.zeros((N, 2))
         for i in range(len(theta_coords)):
             x, y = self.cylinder_radius*np.cos(theta_coords[i]), self.cylinder_radius*np.sin(theta_coords[i])
             chi = x + 1j*y
-            zeta_array[i] = self.Chi_to_zeta(chi) # chi_to_zeta returns a complex number
-            z_array[i] = self.zeta_to_z(zeta_array[i], self.epsilon).real, self.zeta_to_z(zeta_array[i], self.epsilon).imag
-        z_array[-1] = z_array[0] # make sure the last point is the same as the first point
-        self.z_10_array = z_array
-        
+            zeta_array[i] = self.Chi_to_zeta(chi).real, self.Chi_to_zeta(chi).imag
+        self.zeta_geom_array = zeta_array
 
     def plot_geometry_zeta(self):
         """"""
         # make the line type dashed
         linetype = '--'
         color = 'black'
-        plt.plot(self.upper_zeta_coords[:,0], self.upper_zeta_coords[:,1], label = "Cyl", linestyle=linetype, color=color)
-        plt.plot(self.lower_zeta_coords[:,0], self.lower_zeta_coords[:,1], linestyle=linetype, color=color)
-        # plt.plot(self.camber_zeta_coords[:,0], self.camber_zeta_coords[:,1], linestyle=linetype, color=color)
-        # plot the zeta center with a hallow circle marker
+        plt.plot(self.zeta_geom_array[:,0], self.zeta_geom_array[:,1], label = "Cyl", linestyle=linetype, color=color)
         size = 15
         # plt.scatter(self.zeta_center.real, self.zeta_center.imag, color=color, marker='o', s = size, facecolors='none', label="$\\zeta_0$")
         plt.scatter(self.zeta_center.real, self.zeta_center.imag, color=color, s = size, label="$\\zeta_0$")
@@ -246,28 +237,27 @@ class cylinder(potential_flow_object):
 
     def get_full_geometry(self):
         """This function calculates the geometry of the cylinder at every point"""
-        if self.type == "airfoil" and self.output_points <= 3:
-            # raise value error if the number of points is less than or equal to  3
-            print("\n")
-            raise ValueError("The number of points must be greater than 3")
-        elif self.type == "airfoil" and self.output_points > 3:
-            num_points = self.output_points//2 
-        else:
-            num_points = self.output_points//2 
-        # num_points = 50000
-        upper = np.zeros((num_points, 2))  # Ensure upper has the correct size
-        lower = np.zeros((num_points, 2))
-        camber = np.zeros((num_points, 2))
-
+        num_points = len(self.zeta_geom_array)  # Use the length of zeta_geom_array to determine the number of points
         # Make sure that x_coords has points at the leading and trailing edges
-        x_coords = np.linspace(self.x_leading_edge, self.x_trailing_edge, num_points)
-        
-        for i in range(num_points):
-            upper[i], lower[i], camber[i] = self.geometry(x_coords[i])
-        
-        self.upper_coords = upper
-        self.lower_coords = lower
-        self.camber_coords = camber
+        coords_lower = np.zeros((num_points//2, 2))  # Only need half the points for lower coordinates
+        coords_upper = np.zeros((num_points//2, 2))  # Only need half the points for upper coordinates
+        coords_camber = np.zeros((num_points//2, 2))  # Only need half the points for camber coordinates
+        for i in range(len(self.zeta_geom_array)//2): # iterate through the length of the first half of the points
+            # use the zeta_to_z transformation on the self.zeta_geom_array to get the x and y coordinates for the upper and lower surfaces
+            # start with the lower surface
+            zeta_lower = self.zeta_geom_array[i][0] + 1j*self.zeta_geom_array[i][1]
+            z_lower = self.zeta_to_z(zeta_lower, self.epsilon)
+            coords_lower[i] = [z_lower.real, z_lower.imag]
+            # the upper surface is at iteration i + num_points//2 but the process is the same
+            zeta_upper = self.zeta_geom_array[i + num_points//2][0] + 1j*self.zeta_geom_array[i + num_points//2][1]
+            z_upper = self.zeta_to_z(zeta_upper, self.epsilon)
+            coords_upper[i] = [z_upper.real, z_upper.imag]
+            # the camber line can use the x -coordinate from coords_upper or coords_lower, but is zero in the y-coordinate
+            coords_camber[i] = [coords_upper[i][0], 0.0]  # Use the x-coordinate from the upper surface for the camber line
+        self.upper_coords = coords_upper
+        self.lower_coords = coords_lower
+        self.combined_coords_full_z = np.concatenate((self.lower_coords, self.upper_coords), axis=0)  # Combine lower and upper coordinates
+        self.camber_coords = coords_camber
         return self.upper_coords, self.lower_coords, self.camber_coords
     
     def get_and_plot_foci(self):
@@ -440,10 +430,6 @@ class cylinder(potential_flow_object):
         chi = xi_chi + 1j*eta_chi
         zeta = self.Chi_to_zeta(chi)
         dphi_dzeta, d2Phi_dzeta2, dz_dzeta, d2z_dzeta2 = self.dPhi_dzeta(zeta, Gamma), self.d2Phi_dzeta2(zeta, Gamma), self.dZ_dzeta(zeta), self.d2Z_dzeta2(zeta)
-        # print("dphi_dzeta", dphi_dzeta)
-        # print("d2Phi_dzeta2", d2Phi_dzeta2)
-        # print("dz_dzeta", dz_dzeta)
-        # print("d2z_dzeta2", d2z_dzeta2)
         dz_dzeta2 = dz_dzeta * np.conj(dz_dzeta)
         dz_dzeta4 = dz_dzeta**2*np.conj(dz_dzeta)**2
         conv_accel = dphi_dzeta*(d2Phi_dzeta2*dz_dzeta - dphi_dzeta*d2z_dzeta2)/dz_dzeta4
@@ -477,17 +463,11 @@ class cylinder(potential_flow_object):
         """Calculates the convective acceleration numerically in the Cartesian (x, y) plane."""
         point_xy = [point_xi_eta[0], point_xi_eta[1]]
         velocity_func = self.velocity
-        # Compute velocity components (u, v) at the given point
         omega_xi, omega_eta = velocity_func(point_xy, Gamma)
-        # Compute finite difference derivatives for du/dx, du/dy, dv/dx, dv/dy
         derivs = self.function_plus_minus_step_variable(point_xy, Gamma, step, velocity_func)
-        # Compute partial derivatives using central difference
         partials = [hlp.central_difference(derivs[i], derivs[i+1], step) for i in range(0, 8, 2)]  
-        # [du/dx, du/dy, dv/dx, dv/dy]
-        # Ensure the list has exactly 4 elements before accessing
         if len(partials) != 4:
             raise ValueError(f"Expected 4 partial derivatives, but got {len(partials)}. Check function_plus_minus_step_variable.")
-
         # Compute convective acceleration
         convective_acceleration = np.array([
             omega_xi * partials[0] + omega_eta * partials[1],  # a_xi = u du/dx + v du/dy
@@ -498,11 +478,8 @@ class cylinder(potential_flow_object):
     def function_plus_minus_step_variable(self, point_xy, Gamma, step, vel_func):
         """Computes velocity perturbations for numerical differentiation in Cartesian coordinates."""
         xi, eta = point_xy
-        # Perturbations in x and y directions
         perturbations = [(xi + step, eta), (xi - step, eta),  (xi, eta + step), (xi, eta - step)]
-        # Compute velocity components at perturbed locations
         velocities = [vel_func(p, Gamma) for p in perturbations]  # [(u,v) at each perturbed point]
-        # Extract components separately
         omega_xi_plus_dxi, omega_eta_plus_dxi = velocities[0]
         omega_xi_minus_dxi, omega_eta_minus_dxi = velocities[1]
         omega_xi_plus_d_eta, omega_eta_plus_d_eta = velocities[2]
@@ -513,39 +490,6 @@ class cylinder(potential_flow_object):
         """"""
         Appellian_value = 0.0
         if self.appellian_is_area_integral: # using complex conjugate
-            # if abs(D) >= 0.001 and r_values[0] != r_values[-1]:
-            #     r_min, r_max = r_values[0], r_values[-1]
-            #     theta_min, theta_max = theta_values[0], theta_values[-1]
-
-            #     # Define the integrand for dblquad
-            #     def integrand(theta, r):
-            #         accel = acceleration([r, theta], Gamma)
-            #         return accel * r  # Include the r term for the area element
-
-            #     # Perform the double integration
-            #     integral, _ = dblquad(integrand, r_min, r_max, lambda r: theta_min, lambda r: theta_max)
-
-            #     # Scale the result
-            #     Appellian_value = integral * 0.5
-            #     return Appellian_value
-            # elif abs(D) >= 0.001 and r_values[0] == r_values[-1]:
-            #     def integrand(theta, r, Gamma):
-            #         """Define the integrand for the line integral."""
-            #         accel = acceleration([r, theta], Gamma)
-            #         return accel # Include the r term for the area element
-
-            #     # Use the single value of r from r_values
-            #     r = r_values[0]#+0.005*self.cylinder_radius  # Assuming r_values contains only one value
-            #     theta_start = theta_values[0]
-            #     theta_end = theta_values[-1]
-
-            #     # Perform the integration over theta
-            #     integral, _ = quad(integrand, theta_start, theta_end, args=(r, Gamma))
-
-            #     # The result of the line integral
-            #     Appellian_value = integral*(0.5)
-            #     return Appellian_value
-            # else:
             for j in range(len(r_values)):
                 for k in range(len(theta_values)):
                     area_element = r_values[j]*dr*dtheta
@@ -554,24 +498,6 @@ class cylinder(potential_flow_object):
             return Appellian_value*(0.5)
                 # Define the integration bounds
         elif self.appellian_is_line_integral:
-        #     if abs(D) > 0.001:
-        #         def integrand(theta, r, Gamma):
-        #             """Define the integrand for the line integral."""
-        #             accel = acceleration([r, theta], Gamma)
-        #             return accel # Include the r term for the area element
-
-        #         # Use the single value of r from r_values
-        #         r = r_values[0]#+0.005*self.cylinder_radius  # Assuming r_values contains only one value
-        #         theta_start = theta_values[0]
-        #         theta_end = theta_values[-1]
-
-        #         # Perform the integration over theta
-        #         integral, _ = quad(integrand, theta_start, theta_end, args=(r, Gamma))
-
-        #         # The result of the line integral
-        #         Appellian_value = integral*(-0.03125) # 1/32
-        #         return Appellian_value
-        #     else:
             for k in range(len(theta_values)):
                 area_element = r_values[0]*dtheta
                 accel = acceleration([r_values[0], theta_values[k]], Gamma)
@@ -610,38 +536,6 @@ class cylinder(potential_flow_object):
         theta_values = hlp.list_to_range(theta_range)
         # add dtheta to all values in theta_values
         theta_values = [theta + self.dtheta/2 for theta in theta_values]
-        # remove the first and last elements of theta_values
-        # theta_values = theta_values[1:-1] # start at index 2 and end at index -2
-        # calculate distance between theta_values[0] and theta_start. Compare that to theta_values[-1] and theta_end
-        # distance_start = abs(theta_values[0] - theta_start)
-        # distance_end = abs(theta_values[-1] - theta_end)
-        # difference = abs(distance_start - distance_end)
-        # print("Distance start", distance_start)
-        # print("Distance end  ", distance_end)
-        # print("Difference    ", difference)
-        # plt.figure()
-        # self.plot_geometry_zeta()
-        # r_val = self.cylinder_radius
-        #get chi_xi and chi_eta from first theta_values point and r_val
-        # chi_xi_start_singularity, chi_eta_start_singularity = hlp.r_theta_to_xy(r_val, theta_start)
-        # chi_xi_end_singularity, chi_eta_end_singularity = hlp.r_theta_to_xy(r_val, theta_end)
-        # chi_start_singularity = chi_xi_start_singularity + 1j*chi_eta_start_singularity
-        # zeta_start_singularity = self.Chi_to_zeta(chi_start_singularity)
-        # chi_end_singularity = chi_xi_end_singularity + 1j*chi_eta_end_singularity
-        # zeta_end_singularity = self.Chi_to_zeta(chi_end_singularity)
-
-        # plt.scatter(zeta_start_singularity.real, zeta_start_singularity.imag, color='red', marker='o', s=5)
-        # plt.scatter(zeta_end_singularity.real, zeta_end_singularity.imag, color='blue', marker='o', s=5)
-        # # now plot the zeta_surface points using the theta_values
-        # for i in range(len(theta_values)):
-        #     chi_xi, chi_eta = hlp.r_theta_to_xy(r_val, theta_values[i])
-        #     chi = chi_xi + 1j*chi_eta
-        #     zeta = self.Chi_to_zeta(chi)
-        #     plt.scatter(zeta.real, zeta.imag, color='black', marker='o', s=5)
-        # # plot the original theta_start 
-        # self.plot_geometry_settings()
-        # plt.show()
-        # plt.close()
         dr_original = dr
         dtheta_original = self.dtheta
         # now get dr and dtheta in z plane using the zeta to z function 
@@ -1426,115 +1320,43 @@ class cylinder(potential_flow_object):
         self.shifted_upper_coords = np.copy(self.upper_coords)
         self.shifted_lower_coords = np.copy(self.lower_coords)
         self.shifted_camber_coords = np.copy(self.camber_coords)
-        self.shifted_10_coords = np.copy(self.z_10_array)
+        # self.shifted_10_coords = np.copy(self.z_10_array)
         # shift all the points back to where zeta_center = 0 by shifting the x coordinates by the real part of zeta_center as well as the y coordinates by the imaginary part of zeta_center
         self.shifted_upper_coords[:,0], self.shifted_upper_coords[:,1] = self.upper_coords[:,0] - self.zeta_center.real, self.upper_coords[:,1] - self.zeta_center.imag
         self.shifted_lower_coords[:,0], self.shifted_lower_coords[:,1] = self.lower_coords[:,0] - self.zeta_center.real, self.lower_coords[:,1] - self.zeta_center.imag
         # self.shifted_camber_coords[:,0], self.shifted_camber_coords[:,1] = self.camber_coords[:,0] - self.zeta_center.real, self.camber_coords[:,1] - self.zeta_center.imag
-        self.shifted_10_coords[:,0], self.shifted_10_coords[:,1] = self.z_10_array[:,0] - self.zeta_center.real, self.z_10_array[:,1] - self.zeta_center.imag
+        # self.shifted_10_coords[:,0], self.shifted_10_coords[:,1] = self.z_10_array[:,0] - self.zeta_center.real, self.z_10_array[:,1] - self.zeta_center.imag
         # find the left most point in the upper coords and shift all points by that much
         upper_leading_edge = np.min(self.shifted_upper_coords[:,0])
         self.shifted_upper_coords[:,0] = self.shifted_upper_coords[:,0] - upper_leading_edge
         self.shifted_lower_coords[:,0] = self.shifted_lower_coords[:,0] - upper_leading_edge
         # self.shifted_camber_coords[:,0] = self.shifted_camber_coords[:,0] - upper_leading_edge
-        self.shifted_10_coords[:,0] = self.shifted_10_coords[:,0] - upper_leading_edge
+        # self.shifted_10_coords[:,0] = self.shifted_10_coords[:,0] - upper_leading_edge
         # find the right most point in the upper coords and scale all points by that much
         upper_trailing_edge = np.max(self.shifted_upper_coords[:,0])
         self.shifted_upper_coords = self.shifted_upper_coords/upper_trailing_edge
         self.shifted_lower_coords = self.shifted_lower_coords/upper_trailing_edge
-        # self.shifted_camber_coords = self.shifted_camber_coords/upper_trailing_edge
-        self.shifted_10_coords = self.shifted_10_coords/upper_trailing_edge
+        self.shifted_combined_coords = np.concatenate((self.shifted_lower_coords, self.shifted_upper_coords), axis=0)  # combine the upper and lower coords with the lower coords reversed
+        # for i in range(len(self.combined_coords)):
+            # print(self.combined_coords[i,0], self.combined_coords[i,1])
         return self.shifted_upper_coords, self.shifted_lower_coords
+    
+    def export_shifted_joukowski_cylinder(self):
+        """This function exports the shifted Joukowski cylinder coordinates to a text file which starts at the trailing edge, wraps from the bottom surface over the upper surface and back to the trailing edge"""
+        # ensure the output directory exists
+        os.makedirs("text_files", exist_ok=True)
+        # save the shifted upper coords, lower coords, and camber coords to a text file
+        np.savetxt("text_files/shifted_upper_coords.txt", self.shifted_upper_coords, delimiter=",", header="x,y")
+        np.savetxt("text_files/shifted_lower_coords.txt", self.shifted_lower_coords, delimiter=",", header="x,y")
+        np.savetxt("text_files/shifted_camber_coords.txt", self.shifted_camber_coords, delimiter=",", header="x,y")
 
     def plot_shifted_joukowski_cylinder(self):
         """This function plots the shifted Joukowski cylinder"""
         fig, ax = plt.subplots(figsize=(8, 6))
         # plot the upper and lower coords
-        self.combined_coords = np.concatenate((self.shifted_upper_coords, self.shifted_lower_coords[::-1]), axis=0)
-        ax.plot(self.shifted_upper_coords[:,0], self.shifted_upper_coords[:,1], color='black')
-        ax.plot(self.shifted_lower_coords[:,0], self.shifted_lower_coords[:,1], color='black')
-        # plot the upper and lower 10 coords with points on them
-        ax.plot(self.shifted_10_coords[:,0], self.shifted_10_coords[:,1], marker='o', color='black', markersize=2)
-        # ax.scatter(self.shifted_10_coords[0,0], self.shifted_10_coords[0,1], color='black', marker='o', s=20)
-        # insert text between each point in shifted_10_coords by finding the location of each point and moving out normal to the line connecting the two points. The text numbers are 1, 2, 3, ... , len(shifted_10_coords)
-        reversed_coords = self.shifted_10_coords[::-1]
-        # plot a line from point = [0.5, 0.0] to the first element in reversed_coords
-        if self.D == 1.0:
-            ax.plot([0.0,1.0], [0.0,0.0], color='black', linewidth=1)
-            x_values_for_angle, y_values_for_angle = [0.5, reversed_coords[0,0]], [0.0, reversed_coords[0,1]]
-            ax.plot(x_values_for_angle,y_values_for_angle, color = "black", linewidth = 1)
-            # Calculate the angle between the two lines choose the smaller angle
-            angle = (np.arctan2(y_values_for_angle[1] - y_values_for_angle[0], x_values_for_angle[1]-x_values_for_angle[0])) # angle in radians
-            # Arc parameters
-            arc_radius = 0.2  # Adjust as needed for visual clarity
-            theta1 = np.degrees(angle)  # End angle in degrees0  # Start angle in degrees (horizontal to the right)
-            theta2 = 0.0
-            # Create the arc
-            arc = patches.Arc((x_values_for_angle[0], y_values_for_angle[0]), 2*arc_radius, 2*arc_radius, angle=0,
-                            theta1=theta1, theta2=theta2, color='black', lw=1.0)
-            # Add the arc to the axes
-            ax.add_patch(arc)
-            # Optionally, add an angle label
-            ax.text(x_values_for_angle[0] + arc_radius * np.cos(np.radians(theta2/2))+0.01,
-                    y_values_for_angle[0] + arc_radius * np.sin(np.radians(theta2/2))-0.06,
-                    "$\\theta_{stag,aft}$", fontsize=14)
-        fontsize = 17
-        for i in range(len(reversed_coords)-1):
-            # find the value in combined_coords that is closest to the value in reversed_coords[i]
-            closest_value = np.argmin(np.abs(self.combined_coords - reversed_coords[i]), axis=0)
-            # find tangent vector in combined_coords
-            tangent_vector = self.combined_coords[closest_value[0]+1] - self.combined_coords[closest_value[0]]
-            # find the tangent vector by subtracting the two points
-            tangent_vector = reversed_coords[i+1] - reversed_coords[i]
-            tangent_text_vector = reversed_coords[i+1] - reversed_coords[i-1]
-            point_between = (reversed_coords[i] + reversed_coords[i+1]) / 2
-            # find the normal vector by rotating the tangent vector 90 degrees
-            normal_vector = np.array([-tangent_vector[1], tangent_vector[0]])
-            normal_text_vector = np.array([-tangent_text_vector[1], tangent_text_vector[0]])
-            # normalize the normal vector
-            normal_vector = normal_vector / np.linalg.norm(normal_vector)
-            normal_text_vector = normal_text_vector / np.linalg.norm(normal_text_vector)
-            # move out from the point in the normal direction by 0.05
-            text_x = reversed_coords[i,0] + 0.08* normal_text_vector[0]
-            text_y = reversed_coords[i,1] + 0.08 * normal_text_vector[1]
-            if i == 0:
-                ax.text(text_x-0.03, text_y-0.06, str(i+1), fontsize=fontsize)
-                ax.text(text_x-0.01, text_y+0.02, str(len(reversed_coords)-1), fontsize=fontsize)
-            elif i == 1: # last point
-                pass # don't do it
-            else:
-                ax.text(text_x, text_y, str(i), fontsize=fontsize)
-                # ax.text(text_x, text_y-0.02, str(i+1), fontsize=8)
-                # ax.text(text_x, text_y+0.02, str(len(reversed_coords)), fontsize=8)
-            # else:
-            # # plot a normal line vector from point_between in the normal direction (except for the last and first points)
-            if i > 0:
-                ax.plot([point_between[0], point_between[0] + 0.1 * normal_vector[0]], [point_between[1], point_between[1] + 0.1 * normal_vector[1]], color='black', linewidth=0.5)
-
-        ax.set_xlabel("x/c")
-        # set x-axis ticks to be -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2
-        x_ticks = np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2])
-        x_tick_labels = np.array(["0.0", "0.2", "0.4", "0.6", "0.8", "1.0", "1.2"])
-        ax.set_xticks(x_ticks, x_tick_labels) # 1.3 because the right most point is 1.2
-        # x-axis limit
-        ax.set_xlim(-0.2, 1.2)
-        # move the first x-tick label to the right
-        # x_tick_labels = [f"{tick:.1f}" for tick in np.arange(-0.2, 1.3, 0.2)]  # Format tick labels as floats
-        # x_tick_labels[0] = f"    {x_tick_labels[0]}"  # Add spaces to move the first label
-        # set the x-tick labels
-        # ax.set_xticklabels(x_tick_labels)
-        # set y-axis ticks to be -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6
-        ax.set_yticks(np.arange(-0.8, 0.9, 0.4)) # 0.7 because the upper most point is 0.6
-        # y-axis limit
-        ax.set_ylim(-0.8, 0.8)
-        # set the y-axis label to be vertical
-        ax.set_ylabel("y/c", rotation=0, labelpad=15)
-        # set the aspect ratio to be equal
-        ax.set_aspect('equal', adjustable='box')
-        file_name = "figures/shifted_joukowski_cylinder_" + str(self.zeta_center.real) + "_alpha_" + str(round(self.angle_of_attack*180/np.pi, 1)) + ".svg"
-        plt.savefig(file_name, format='svg', bbox_inches='tight')
-        print("Shifted Joukowski cylinder figure saved as:", file_name)
-        plt.close()
+        # self.combined_coords = np.concatenate((self.shifted_upper_coords, self.shifted_lower_coords[::-1]), axis=0) # combine the upper and lower coords with the lower coords reversed
+        ax.scatter(self.shifted_combined_coords[:,0], self.shifted_combined_coords[:,1], color='black', s = 2)
+        # ax.scatter(self.shifted_lower_coords[:,0], self.shifted_lower_coords[:,1], color='black', s = 2)
 
     def calculate_surface_pressure(self, point_xi_eta_in_zplane, Gamma):
         """This function calculates the surface pressure at a point using the velocity at that point"""

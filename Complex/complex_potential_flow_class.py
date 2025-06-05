@@ -306,8 +306,11 @@ class potential_flow_object:
         """This function plots the geometry in question"""
         # define the angle
         # self.get_full_geometry()
-        plt.plot(self.upper_coords[:,0], self.upper_coords[:,1], color = "black", label = "J-Cyl") # upper plot
-        plt.plot(self.lower_coords[:,0], self.lower_coords[:,1] , color = "black") # lower plot
+        if self.is_conformal_mapping:
+            plt.scatter(self.combined_coords_full_z[:,0], self.combined_coords_full_z[:,1], color = "black", label = "J-Cyl", s=0.5) 
+        else:
+            plt.scatter(self.upper_coords[:,0], self.upper_coords[:,1], color = "black", label = "Upper Surface", s = 0.5)
+            plt.scatter(self.lower_coords[:,0], self.lower_coords[:,1] , color = "black", s= 0.5) # lower plot
         plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
         # print("x lower limit", self.plot_x_lower_lim)
         # print("x upper limit", self.plot_x_upper_lim)

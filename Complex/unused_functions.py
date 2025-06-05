@@ -969,6 +969,87 @@ class extras(potential_flow_object):
                             (C/(r*np.exp(theta*1j) + r_0*np.exp(theta_0*1j))**2 - 1)**3)
         # print("conv_accel_squared", conv_accel_squared)
         return np.real(conv_accel_squared)
+    
+
+    def appellian_acceleration_loop(self, Gamma: float, r_values: np.array, theta_values: np.array, dr: float, dtheta: float, D, acceleration: callable):
+        """"""
+        Appellian_value = 0.0
+        if self.appellian_is_area_integral: # using complex conjugate
+            # if abs(D) >= 0.001 and r_values[0] != r_values[-1]:
+            #     r_min, r_max = r_values[0], r_values[-1]
+            #     theta_min, theta_max = theta_values[0], theta_values[-1]
+
+            #     # Define the integrand for dblquad
+            #     def integrand(theta, r):
+            #         accel = acceleration([r, theta], Gamma)
+            #         return accel * r  # Include the r term for the area element
+
+            #     # Perform the double integration
+            #     integral, _ = dblquad(integrand, r_min, r_max, lambda r: theta_min, lambda r: theta_max)
+
+            #     # Scale the result
+            #     Appellian_value = integral * 0.5
+            #     return Appellian_value
+            # elif abs(D) >= 0.001 and r_values[0] == r_values[-1]:
+            #     def integrand(theta, r, Gamma):
+            #         """Define the integrand for the line integral."""
+            #         accel = acceleration([r, theta], Gamma)
+            #         return accel # Include the r term for the area element
+
+            #     # Use the single value of r from r_values
+            #     r = r_values[0]#+0.005*self.cylinder_radius  # Assuming r_values contains only one value
+            #     theta_start = theta_values[0]
+            #     theta_end = theta_values[-1]
+
+            #     # Perform the integration over theta
+            #     integral, _ = quad(integrand, theta_start, theta_end, args=(r, Gamma))
+
+            #     # The result of the line integral
+            #     Appellian_value = integral*(0.5)
+            #     return Appellian_value
+            # else:
+            for j in range(len(r_values)):
+                for k in range(len(theta_values)):
+                    area_element = r_values[j]*dr*dtheta
+                    accel = acceleration([r_values[j], theta_values[k]], Gamma)
+                    Appellian_value += accel*area_element
+            return Appellian_value*(0.5)
+                # Define the integration bounds
+        elif self.appellian_is_line_integral:
+        #     if abs(D) > 0.001:
+        #         def integrand(theta, r, Gamma):
+        #             """Define the integrand for the line integral."""
+        #             accel = acceleration([r, theta], Gamma)
+        #             return accel # Include the r term for the area element
+
+        #         # Use the single value of r from r_values
+        #         r = r_values[0]#+0.005*self.cylinder_radius  # Assuming r_values contains only one value
+        #         theta_start = theta_values[0]
+        #         theta_end = theta_values[-1]
+
+        #         # Perform the integration over theta
+        #         integral, _ = quad(integrand, theta_start, theta_end, args=(r, Gamma))
+
+        #         # The result of the line integral
+        #         Appellian_value = integral*(-0.03125) # 1/32
+        #         return Appellian_value
+        #     else:
+            for k in range(len(theta_values)):
+                area_element = r_values[0]*dtheta
+                accel = acceleration([r_values[0], theta_values[k]], Gamma)
+                Appellian_value += accel*area_element
+            return Appellian_value*(-0.03125) # 1/32
+        else:
+            for j in range(len(r_values)):
+                for k in range(len(theta_values)):
+                    Chi = hlp.r_theta_to_xy(r_values[j], theta_values[k])[0] + 1j*hlp.r_theta_to_xy(r_values[j], theta_values[k])[1] # the r, theta point in the Chi plane is converted to a complex number
+                    zeta = self.Chi_to_zeta(Chi)
+                    z = self.zeta_to_z(zeta, self.epsilon)
+                    r_z = hlp.xy_to_r_theta(z.real, z.imag)[0]
+                    area_element = r_z * dr * dtheta
+                    convective_acceleration = acceleration([z.real, z.imag], Gamma)
+                    Appellian_value += np.dot(convective_acceleration, convective_acceleration)*area_element
+        return Appellian_value*0.5
 
     if __name__ == "__main__":
         four = 4 # placeholder 

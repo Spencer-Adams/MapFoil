@@ -15,8 +15,8 @@
         "epsilon": 0.07240573993276778,
         "epsilonx": 0.09,
         "zeta_0y": [-0.07147768141142521,0.0],
-        "zeta_0x": [-0.09,0.0],
-        "zeta_0": [-0.09237604307034011 ,  0.03802668541707471],
+        "zeta_0": [-0.09,0.0],
+        "zeta_0x": [-0.09237604307034011 ,  0.03802668541707471],
         "zeta_0xx": [-0.09,0.09],
         "design_CL": 0.261,
         "design_thickness": 0.12,
@@ -28,31 +28,29 @@
     },
     "operating": {
         "freestream_velocity": 10.0,
-        "angle_of_attack[deg]": 0.0,
+        "angle_of_attack[deg]": 5.0,
         "circulation_strength": 10.0
     },
     "appellian": {
-        "is_compute_appellian" : true,
-        "dtheta_(num_to_divide_pi_by)x" : 10,
-        "dtheta_(num_to_divide_pi_by)" : 50000,
-        "appellian_is_area_integral" : false,
+        "is_compute_appellian" : false,
+        "num_theta_steps" : 5000000,
         "appellian_is_line_integral" : true,
         "appellian_minimization_method" : "roots_of_derive_of_poly_fit",
         "appellian_minimization_method_options" : ["roots_of_derive_of_poly_fit", "newtons_method"],
         "polynomial_order" : 4,
         "is_calc_circulation_for_varying_shape" : false,
         "is_calc_z_plane_surface_pressure_distribution" : false,
-        "is_calc_convergence_to_kutta" : false,
+        "is_calc_convergence_to_kutta" : true,
         "is_calc_theta_convergence" : false,
         "is_calc_r_convergence" : false,
         "is_calc_rb_comparisons" : false
     },
     "plot": {
-        "is_plot_appellian": true,
+        "is_plot_appellian": false,
         "is_plot_appellian_for_varying_circulation" : false,
         "is_plot_D_sweep_alpha_considerations": false,
-        "is_plot_circulation_for_varying_shape": true,
-        "is_plot_convergence_to_kutta": false,
+        "is_plot_circulation_for_varying_shape": false,
+        "is_plot_convergence_to_kutta": true,
         "is_plot_theta_convergence": false,
         "is_plot_shifted_joukowski_cylinder": false,
         "is_plot_r_convergence": false,
@@ -70,6 +68,6 @@
         "delta_y": 0.4,
         "is_plot_streamlines": false,
         "save_fig": false,
-        "show_fig": true
+        "show_fig": false
     }
 }
