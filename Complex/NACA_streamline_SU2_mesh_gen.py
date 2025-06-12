@@ -586,10 +586,11 @@ if __name__ == "__main__":
         "sharex" : True
     }
     mesh = mesh_generation_object()
-    mesh.create_SU2_mesh_file(filename="mesh.su2", text_file_mesh="text_files/mesh_files/full_mesh/C_mesh_Joukowski_cylinder_zeta0_over_R_is_-0.09+0.0i_surface_6_wake_6_radial_6.txt", triangle_or_quad="quad")
-    mesh.plot_C_mesh()
-    plt.show()
-    plt.close()
+    # mesh.create_SU2_mesh_file(filename="mesh.su2", text_file_mesh="text_files/mesh_files/full_mesh/C_mesh_Joukowski_cylinder_zeta0_over_R_is_-0.09+0.0i_surface_6_wake_6_radial_6.txt", triangle_or_quad="quad")
+    # mesh.plot_C_mesh()
+    mesh.plot()
+    # plt.show()
+    # plt.close()
     # print("Mesh generation object initialized.")
 
 

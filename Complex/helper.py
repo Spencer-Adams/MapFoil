@@ -27,6 +27,9 @@ def parse_dictionary_or_return_default(dictionary, keys, default):
         return dictionary 
     else:
         raise ValueError(f"Key {keys} not found in dictionary and no default value provided.")
+    
+def plot_xy_array(xy_array: np.array):
+    plt.plot(xy_array[:, 0], xy_array[:, 1], color='black', linewidth=0.5)
 
 def vector_magnitude(vector: np.array): # Used to help A6 in the project. The streamlines need to be integrated forward using the unit velocity vector
     """
@@ -52,7 +55,7 @@ def unit_vector(vector: np.array): # Used to help A6 in the project. The streaml
     unit_vector = [element/magnitude for element in vector]
     return unit_vector
 
-def rk4(start: np.array, direction: int, step_size: float,  move_off_direction_func: callable, function: callable): # Helps with A6 on the project
+def rk4(start: np.array, direction: int, step_size: float,  move_off_direction_func: callable, function: callable):
     """This function performs a Runge-Kutta 4th order integration
 
     Args:
@@ -77,8 +80,9 @@ def rk4(start: np.array, direction: int, step_size: float,  move_off_direction_f
     # if all of the function values in the np.array are really close to zero, step the point off in the move off direction. 
     while np.all(np.abs(function(point)) < 1e-12):
         for i in range(len(point)):
-            print("point", point)
-            print("velocity", function(point))
+            print("The function values are too small. Stepping the point off in the move off direction.")
+            print("point: ", point)
+            print("velocity: ", function(point))
             move_off_direction = move_off_direction_func(point[0])[i]
             point[i] = point[i] + move_off_direction[i]*1e-6
             break
@@ -90,6 +94,28 @@ def rk4(start: np.array, direction: int, step_size: float,  move_off_direction_f
     point_new = point + (h/6)*(k1 + 2*k2 + 2*k3 + k4)
     point_new = np.array(point_new)
     return point_new
+
+def sort_points_counterclockwise(points: np.ndarray) -> np.ndarray:
+    """
+    Sort an array of 2D points in counterclockwise order around their centroid.
+
+    Parameters:
+    - points (np.ndarray): shape (n, 2), each row is an (x, y) point.
+
+    Returns:
+    - sorted_points (np.ndarray): shape (n, 2), points in CCW order.
+    """
+    points = np.asarray(points)
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError("Input must be an (n, 2) array of xy points.")
+    # Step 1: Compute centroid
+    centroid = np.mean(points, axis=0)
+    # Step 2: Compute angle to each point
+    angles = np.arctan2(points[:,1] - centroid[1], points[:,0] - centroid[0])
+    # Step 3: Sort points by angle
+    sorted_indices = np.argsort(angles)
+    sorted_points = points[sorted_indices]
+    return sorted_points
 
 
 def list_to_range(three_element_list: list):

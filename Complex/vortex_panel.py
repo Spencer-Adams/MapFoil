@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
 from tabulate import tabulate
-from complex_potential_flow_class import potential_flow_object
+from potential_flow_class import potential_flow_object
 from tqdm import tqdm
 import time
 np.set_printoptions(precision=15)
@@ -256,7 +256,7 @@ class vort_panel(potential_flow_object):
         yl = yc - (t/(2*np.sqrt(1 + dy_dx**2)))
         return xl, yl
     
-    def geometry_vortex(self, x: float):
+    def geometry(self, x: float):
         """This function takes in a chord-wise x coordinate and returns the x_camber, x_upper, x_lower,  and  coordinate of the NACA airfoil (remember that the upper and lower surface positions are perpendicular to the camber line)"""
         if not isinstance(x, float):
             raise TypeError("The input value must be a float")
@@ -265,7 +265,7 @@ class vort_panel(potential_flow_object):
         x_lower, y_lower = self.calculate_point_lower(x)
         return [x_upper, y_upper], [x_lower, y_lower], [x_camber, y_camber]
 
-    def get_full_geometry_vortex(self):
+    def get_full_geometry(self):
         
         # check if the airfoil is a text file read in or anything else
         # if it's a text file, then read in the text file
@@ -284,7 +284,7 @@ class vort_panel(potential_flow_object):
             if not self.even_num_points:
                 theta = 0.0  # Initialize theta
                 x = 0.5 * (1 - np.cos(theta))  # Cosine clustering for x-coordinate
-                upper_last, lower_first, camber_first = self.geometry_vortex(x)
+                upper_last, lower_first, camber_first = self.geometry(x)
                 delta_theta = np.pi / np.real(self.n_geom_points / 2)  # Cosine clustering increment
                 # Loop through and fill the coordinates
                 for i in range(1, self.n_geom_points // 2 + 1):
@@ -292,7 +292,7 @@ class vort_panel(potential_flow_object):
                     x = 0.5 * (1 - np.cos(itheta))  # Cosine clustering for x-coordinate
 
                     # Call geometry function 
-                    upper, lower, camber = self.geometry_vortex(x)
+                    upper, lower, camber = self.geometry(x)
                     upper_coords[self.n_geom_points // 2 + 1 + i][0] = upper[0]  # upper surface x-coordinate
                     upper_coords[self.n_geom_points // 2 + 1 + i][1] = upper[1]  # upper surface y-coordinate
                     lower_coords[self.n_geom_points // 2 + 1 - i][0] = lower[0]  # lower surface x-coordinate
@@ -325,7 +325,7 @@ class vort_panel(potential_flow_object):
             else:
                 theta = 0.0  # Initialize theta
                 x = 0.5 * (1 - np.cos(theta))  # Cosine clustering for x-coordinate
-                upper, lower, camber = self.geometry_vortex(x)
+                upper, lower, camber = self.geometry(x)
                 upper_coords[self.n_geom_points // 2][0] = upper[0]
                 upper_coords[self.n_geom_points // 2][1] = upper[1]
                 lower_coords[self.n_geom_points // 2][0] = lower[0]
@@ -339,7 +339,7 @@ class vort_panel(potential_flow_object):
                     x = 0.5 * (1 - np.cos(itheta - 0.5 * delta_theta))  # Cosine clustering for x-coordinate
 
                     # Call geometry function
-                    upper, lower, camber = self.geometry_vortex(x)
+                    upper, lower, camber = self.geometry(x)
                     upper_coords[self.n_geom_points // 2 + i][0] = upper[0]  # upper surface x-coordinate
                     upper_coords[self.n_geom_points // 2 + i][1] = upper[1]  # upper surface y-coordinate
                     lower_coords[self.n_geom_points // 2 + 1 - i][0] = lower[0]  # lower surface x-coordinate
@@ -370,7 +370,7 @@ class vort_panel(potential_flow_object):
             # if self.export_geometry is True, then export the geometry to a txt file
             if self.export_geometry:
                 print("Exporting geometry to csv file...")
-                file_name = "text_files/mesh_files/surface_mesh/naca/" + self.Airfoil_type + "_" + str(self.n_geom_points) + ".txt"
+                file_name = self.Airfoil_type + "_" + str(self.n_geom_points) + ".txt"
                 # save text file
                 np.savetxt(file_name, self.surface_points, delimiter = ",", header = "x, y", comments = "")
                 print("Geometry exported to", file_name)
@@ -733,7 +733,7 @@ if __name__ == "__main__":
     time_1 = time.time()    
     vort.num_points_is_even()
     vort.define_Airfoil()
-    vort.get_full_geometry_vortex()
+    vort.get_full_geometry()
     vort.calc_L()
     vort.calc_control_points()
     vort.calc_a_matrix()
@@ -742,7 +742,7 @@ if __name__ == "__main__":
 
     if vort.plot_streamlines:
         vort.plot_geometry()
-        # vort.plot()
+        vort.plot()
         plt.xlim(vort.plot_x_lower_lim, vort.plot_x_upper_lim)
         plt.ylim(-0.5, 0.5)
         plt.gca().set_aspect("equal")

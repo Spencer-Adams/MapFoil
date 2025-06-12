@@ -10,7 +10,7 @@
         "transformation_type_options" : ["joukowski", "taha"],
         "use_shape_parameter_D" : true,
         "trailing_edge_curvature_Dx" : 0.0009995004996253424,
-        "shape_parameter_D" : 0.0001,
+        "shape_parameter_D" : 0.001,
         "trailing_edge_sharpness_options" : "float from 0.0 (Sharp) to 1.0 (Circular Cylinder)",
         "epsilon": 0.07240573993276778,
         "epsilonx": 0.09,
@@ -20,7 +20,7 @@
         "zeta_0xx": [-0.09,0.09],
         "design_CL": 0.261,
         "design_thickness": 0.12,
-        "output_points": 2000,
+        "output_points": 100,
         "taha": {
             "tau": 0.1,
             "D": 0.001
@@ -29,18 +29,18 @@
     "operating": {
         "freestream_velocity": 10.0,
         "angle_of_attack[deg]": 5.0,
-        "circulation_strength": 10.0
+        "circulation_strength": 10.95
     },
     "appellian": {
         "is_compute_appellian" : false,
-        "num_theta_steps" : 5000000,
+        "num_theta_steps" : 10000,
         "appellian_is_line_integral" : true,
         "appellian_minimization_method" : "roots_of_derive_of_poly_fit",
         "appellian_minimization_method_options" : ["roots_of_derive_of_poly_fit", "newtons_method"],
         "polynomial_order" : 4,
         "is_calc_circulation_for_varying_shape" : false,
         "is_calc_z_plane_surface_pressure_distribution" : false,
-        "is_calc_convergence_to_kutta" : true,
+        "is_calc_convergence_to_kutta" : false,
         "is_calc_theta_convergence" : false,
         "is_calc_r_convergence" : false,
         "is_calc_rb_comparisons" : false
@@ -50,7 +50,7 @@
         "is_plot_appellian_for_varying_circulation" : false,
         "is_plot_D_sweep_alpha_considerations": false,
         "is_plot_circulation_for_varying_shape": false,
-        "is_plot_convergence_to_kutta": true,
+        "is_plot_convergence_to_kutta": false,
         "is_plot_theta_convergence": false,
         "is_plot_shifted_joukowski_cylinder": false,
         "is_plot_r_convergence": false,
@@ -60,14 +60,14 @@
         "alphas_for_consideration": [10.0, 15.0],
         "is_plot_z_selection_comparison": false,
         "is_create_dsweep_gif": false,
-        "x_lower_limit": -3.0,
-        "x_upper_limit":  3.0,
-        "x_start":       -3.0,
-        "delta_s": 0.01,
-        "n_lines": 8,
+        "x_lower_limit": -6.0,
+        "x_upper_limit":  6.0,
+        "x_start":       -6.0,
+        "delta_s": 0.1,
+        "n_lines": 2,
         "delta_y": 0.4,
-        "is_plot_streamlines": false,
+        "is_plot_streamlines": true,
         "save_fig": false,
-        "show_fig": false
+        "show_fig": true
     }
 }
