@@ -367,6 +367,29 @@ class cylinder(potential_flow_object):
         Potential_complex = np.array([Potential.real, Potential.imag])  # the minus sign is because we are using the complex potential
         return Potential_complex
     
+    def potential_for_mesh(self, point_xi_eta_in_z_plane, C = 0.0):
+        """This function calculates the potential at a given point in the flow field in the z plane"""
+        Gamma = self.circulation  # use the circulation from the class variable
+        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
+        zeta = self.z_to_zeta(z, self.epsilon)
+        Potential = self.freestream_velocity*(zeta*np.exp(-1j*self.angle_of_attack) + 1j*Gamma/(2*np.pi*self.freestream_velocity)*np.log(zeta-self.zeta_center) + np.exp(1j*self.angle_of_attack)*self.cylinder_radius**2/(zeta-self.zeta_center)) + C
+        Potential_complex = np.array([Potential.real, Potential.imag])  # the minus sign is because we are using the complex potential
+        return Potential_complex
+
+    def stream_function(self, point_xi_eta_in_z_plane):
+        """This function calculates the stream function from the potential vector"""
+        # The stream function is the imaginary part of the complex potential
+        potential = self.potential_for_mesh(point_xi_eta_in_z_plane)
+        stream_function = potential[1]  # the second element is the imaginary part
+        return stream_function
+
+    def small_potential_function(self, point_xi_eta_in_z_plane):
+        """"""
+        potential = self.potential_for_mesh(point_xi_eta_in_z_plane)
+        # The small potential function is the real part of the complex potential
+        small_potential = potential[0]  # the first element is the real part
+        return small_potential
+
     def velocity(self, point_xi_eta_in_z_plane, Gamma):
         """This function calculates the velocity at a given point in the flow field in the z plane"""
         z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]

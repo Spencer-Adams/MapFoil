@@ -126,64 +126,122 @@ class mesh_generation_object(cylinder, vort_panel):
                 point = point_new
                 i += 1
         return np.array(streamline_points)
-
-    def calc_wrapped_stream_or_potential_line(self, start_point: np.array, direction: int, func=None, radial_growth=None, psi_spacing = None):
-        """This function calculates the streamline of a given flow field, updating the progress bar based only on x-distance moved."""
+    
+    def calc_wrapped_stream_or_potential_line(self, start_point: np.array, direction: int, psi_targets=None, func=None, radial_growth=None):
+        """
+        Calculates a streamline or potential line radiating from a surface point.
+        
+        If psi_targets is provided, it steps to match those stream function values.
+        Otherwise, it uses geometric spacing defined by self.radial_nodes and radial_growth.
+        """
+        # Default settings
         if func is None:
-            func = self.unit_velocity
+            func = self.unit_velocity  # Streamline
             desc = "Calculating Streamline"
         else:
             desc = "Calculating Potential Line"
+
         if radial_growth is None:
             radial_growth = self.radial_growth
-        else:
-            original_radial_growth = self.radial_growth
-            self.radial_growth = radial_growth  # temporarily set radial growth for this calculation
-        # Ensure start_point is a NumPy array with two float elements
+
         if not isinstance(start_point, np.ndarray) or start_point.shape != (2,) or not np.issubdtype(start_point.dtype, np.floating):
-            raise ValueError("The start_point must be a NumPy array of two float values representing x and y coordinates.")
+            raise ValueError("start_point must be a NumPy array of two float values.")
+
         point = np.array(start_point)
-        streamline_points = [point]
-        upper_ds = 100  # Initial guess for ds
-        # Initial arc length estimate from quick streamline
-        streamline_points_starters = self.evaluate_single_stream_or_potential_line(point, direction, func=func)
-        total_arc_length = hlp.compute_arc_length(streamline_points_starters)
-        # Precompute geometric spacing
-        if psi_spacing != None:
-            deltas = psi_spacing
+        points = [point]
+
+        if psi_targets is not None:
+            # Step outward to match given stream function values
+            for target_psi in psi_targets:
+                ds = self.find_correct_ds_for_psi(100.0, point, direction, target_psi, func=func)
+                point_new = hlp.rk4(point, direction, ds, self.surface_normal, func)
+                points.append(point_new)
+                point = point_new
         else:
-            deltaD_0 = self.calc_deltaD_0(self.radial_nodes, radial_growth, total_distance=total_arc_length)
-            deltas = deltaD_0 * self.radial_growth ** np.arange(self.radial_nodes)
-        for i in tqdm(range(self.radial_nodes), desc=desc, unit="points"):
-            delta = deltas[i]
-            delta_s = self.find_correct_ds(upper_ds, point, direction, delta)
-            point_new = hlp.rk4(point, direction, delta_s, self.surface_normal, func)
-            streamline_points.append(point_new)
-            point = point_new
-        
-        if radial_growth != original_radial_growth:
-            self.radial_growth = original_radial_growth
-        streamline_points = np.array(streamline_points)
-        return streamline_points
+            # Step outward based on geometric spacing
+            initial_line = self.evaluate_single_stream_or_potential_line(point, direction, func=func)
+            total_distance = hlp.compute_arc_length(initial_line)
+
+            deltaD_0 = self.calc_deltaD_0(self.radial_nodes, radial_growth, total_distance=total_distance)
+            deltas = deltaD_0 * radial_growth ** np.arange(self.radial_nodes)
+
+            for delta in deltas:
+                ds = self.find_correct_ds(100.0, point, direction, delta, func=func)
+                point_new = hlp.rk4(point, direction, ds, self.surface_normal, func)
+                points.append(point_new)
+                point = point_new
+
+        return np.array(points)
+
     
-    def bisection_function(self, ds, point, direction, delta_position):
-        new_point = hlp.rk4(point, direction, ds, self.surface_normal, self.unit_velocity)
+    def bisection_function(self, ds, point, direction, delta_position, func=None):
+        if func is None:
+            func = self.unit_velocity
+        new_point = hlp.rk4(point, direction, ds, self.surface_normal, func)
         return np.linalg.norm(new_point - point) - delta_position
 
-    def find_correct_ds(self, starting_ds, point, direction, delta_position, tolerance=1e-4, max_iter=10000):
+    def find_correct_ds_for_psi(self, starting_ds, point, direction, target_psi, func=None, tolerance=1e-4, max_iter=100):
+        """
+        Find ds such that ψ(point + ds) = target_psi using bisection.
+        Works for both positive and negative ψ targets.
+        """
+        if func is None:
+            func = self.unit_normal_velocity
+
+        ds_low = 0.0
+        ds_high = starting_ds
+
+        psi_start = self.stream_function(point)
+
+        def psi_error(ds):
+            new_point = hlp.rk4(point, direction, ds, self.surface_normal, func)
+            return self.stream_function(new_point) - target_psi
+
+        err_low = psi_error(ds_low)
+        err_high = psi_error(ds_high)
+
+        # Expand ds_high until it brackets the target
+        attempts = 0
+        while err_low * err_high > 0 and attempts < 50:
+            ds_high *= 2
+            err_high = psi_error(ds_high)
+            attempts += 1
+
+        if err_low * err_high > 0:
+            print("Could not bracket ψ target; returning default step.")
+            return starting_ds
+
+        for _ in range(max_iter):
+            ds_mid = 0.5 * (ds_low + ds_high)
+            err_mid = psi_error(ds_mid)
+            if abs(err_mid) < tolerance:
+                return ds_mid
+            elif err_low * err_mid < 0:
+                ds_high = ds_mid
+                err_high = err_mid
+            else:
+                ds_low = ds_mid
+                err_low = err_mid
+
+        print("Warning: Maximum iterations reached in find_correct_ds_for_psi.")
+        return ds_mid
+
+    def find_correct_ds(self, starting_ds, point, direction, delta_position, tolerance=1e-4, max_iter=10000, func=None):
         """Find ds such that the change in position matches delta_position within tolerance using bisection."""
         # Establish initial bounds
+        if func is None:
+            func = self.unit_velocity
         ds_low = 0.0
         ds_high = starting_ds
         # Expand upper bound until we bracket the root
-        while self.bisection_function(ds_high, point, direction, delta_position) < 0:
+        while self.bisection_function(ds_high, point, direction, delta_position, func = func) < 0:
             ds_high *= 2
             if ds_high > 1e6:
                 print("Failed to bracket root; returning small ds.")
                 return 0.1
         for _ in range(max_iter):
             ds_mid = 0.5 * (ds_low + ds_high)
-            f_mid = self.bisection_function(ds_mid, point, direction, delta_position)
+            f_mid = self.bisection_function(ds_mid, point, direction, delta_position, func = func)
             if abs(f_mid) < tolerance:
                 return ds_mid
             elif f_mid < 0:
@@ -253,10 +311,10 @@ class mesh_generation_object(cylinder, vort_panel):
         if self.is_visualize_mesh:
             plt.scatter(self.upper_coords[:, 0], self.upper_coords[:, 1], color='blue', label='Upper Points', s=0.1)
             plt.scatter(self.lower_coords[:, 0], self.lower_coords[:, 1], color='red', label='Lower Points', s=0.1)
-            for i in range(len(self.upper_coords)):
-                plt.text(self.upper_coords[i, 0] + 0.05, self.upper_coords[i, 1] - 0.05, str(int(self.upper_coords[i, 2])), fontsize=8, color='black')
-            for j in range(len(self.lower_coords)):
-                plt.text(self.lower_coords[j, 0] + 0.05, self.lower_coords[j, 1] - 0.05, str(int(self.lower_coords[j, 2])), fontsize=8, color='black')
+            # for i in range(len(self.upper_coords)):
+            #     plt.text(self.upper_coords[i, 0] + 0.05, self.upper_coords[i, 1] - 0.05, str(int(self.upper_coords[i, 2])), fontsize=8, color='black')
+            # for j in range(len(self.lower_coords)):
+            #     plt.text(self.lower_coords[j, 0] + 0.05, self.lower_coords[j, 1] - 0.05, str(int(self.lower_coords[j, 2])), fontsize=8, color='black')
         self.inner_boundary_mesh = np.concatenate((self.upper_coords, self.lower_coords), axis=0)
         self.last_body_index = self.lower_coords[-1, 2]  # this is the last index of the lower surface
     
@@ -348,69 +406,92 @@ if __name__ == "__main__":
     midline_start_points = mesh.create_body_mesh()
     
     marker_size = 0.1
-    #move the forward_stag point in the unit normal direction by 1e-12 to avoid numerical issues
-    mesh.forward_stag = mesh.forward_stag - 1e-8 * mesh.forward_stag_unit_normal
-    forward_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1) # :2 means we only take the x and y coordinates
-    # remove the first point of the streamline, since it is the forward_stag point
-    forward_stag_streamline = forward_stag_streamline[1:]  # remove the first point, which is the forward_stag point
-    for i in range(len(forward_stag_streamline)):
-        # print(forward_stag_streamline[i, 0], forward_stag_streamline[i, 1])
-        plt.plot(forward_stag_streamline[i, 0], forward_stag_streamline[i, 1], 'ro', markersize=marker_size)
 
-    # move the aft_stag point in the unit normal direction by 1e-12 to avoid numerical issues
-    mesh.aft_stag = mesh.aft_stag + 1e-8 * mesh.aft_stag_unit_normal
-    aft_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, 1) # :2 means we only take the x and y coordinates
-    # remove the first point of the streamline, since it is the aft_stag point
-    aft_stag_streamline = aft_stag_streamline[1:]  # remove the first point, which is the aft_stag point
-    for i in range(len(aft_stag_streamline)):
-        plt.plot(aft_stag_streamline[i, 0], aft_stag_streamline[i, 1], 'ro', markersize=marker_size) # ro means red color and circle marker, bo means blue color and circle marker
+    # upper midline
+    upper_midline = mesh.calc_wrapped_stream_or_potential_line(mesh.closest_upper_point[:2],direction=1,psi_targets=None,func=mesh.unit_normal_velocity)[1:]  # drop the first point (which is the surface point)
+    # Plot the midline potential line
+    # plt.plot(upper_midline[:, 0], upper_midline[:, 1], 'bo', markersize=marker_size)  # blue color and circle marker
+    plt.scatter(upper_midline[:, 0], upper_midline[:, 1], color='black', s=marker_size)  # blue color and circle marker
+    # Compute ψ values along this midline
+    upper_stream_function_values = np.array([mesh.stream_function(p) for p in upper_midline])
+    # For each other upper surface point, generate potential lines that match the ψ levels found above
+    matched_upper_lines = []
+    for i in range(len(mesh.upper_coords)):
+        if not np.allclose(mesh.upper_coords[i, :2], mesh.closest_upper_point[:2]):
+            start_point = mesh.upper_coords[i, :2]
+            matched_line = mesh.calc_wrapped_stream_or_potential_line(start_point,direction=1,psi_targets=upper_stream_function_values,func=mesh.unit_normal_velocity)[1:]  # skip surface point again
+            matched_upper_lines.append(matched_line)
+            plt.scatter(matched_line[:, 0], matched_line[:, 1], color="black", s=marker_size)
+            # plt.plot(matched_line[:, 0], matched_line[:, 1], 'go', markersize=marker_size)
 
+    # lower midline
+    lower_midline = mesh.calc_wrapped_stream_or_potential_line(mesh.closest_lower_point[:2],direction=-1,psi_targets=None,func=mesh.unit_normal_velocity)[1:]  # drop the first point (which is the surface point)
+    # Plot the midline potential line
+    # plt.plot(lower_midline[:, 0], lower_midline[:, 1], 'ro', markersize=marker_size)  # red color and circle marker
+    plt.scatter(lower_midline[:, 0], lower_midline[:, 1], color='black', s=marker_size)  # blue color and circle marker
+    # Compute ψ values along this midline
+    lower_stream_function_values = np.array([mesh.stream_function(p) for p in lower_midline])
+    # For each other lower surface point, generate potential lines that match the ψ levels found above
+    matched_lower_lines = []
+    for j in range(len(mesh.lower_coords)):
+        if not np.allclose(mesh.lower_coords[j, :2], mesh.closest_lower_point[:2]):
+            start_point = mesh.lower_coords[j, :2]
+            matched_line = mesh.calc_wrapped_stream_or_potential_line(start_point,direction=-1,psi_targets=lower_stream_function_values,func=mesh.unit_normal_velocity)[1:]
+            matched_lower_lines.append(matched_line)
+            # plt.plot(matched_line[:, 0], matched_line[:, 1], 'go', markersize=marker_size)  # green color and circle marker
+            plt.scatter(matched_line[:, 0], matched_line[:, 1], color='black', s=marker_size)
 
-    # plot potential lines coming off the upper surface
-    for i in range(len(mesh.upper_coords)):  # skip the first and last points
-        x_start, y_start = mesh.upper_coords[i, 0], mesh.upper_coords[i, 1]
-        start_point = np.array([x_start, y_start])
-        potential_line_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1, func=mesh.unit_normal_velocity, radial_growth = 1.1)
-        # remove the first point of the potential line, since it is the upper_coords point
-        potential_line_upper = potential_line_upper[1:]
-        plt.plot(potential_line_upper[:, 0], potential_line_upper[:, 1], 'go', markersize=marker_size)  # green color and circle marker
+    # create geometrically spaced streamlines from the stagnation points
+    forward_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1)[1:]
+    aft_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, 1)[1:]
+    # plot the forward stagnation streamline
+    # plt.plot(forward_stag_streamline[:, 0], forward_stag_streamline[:, 1], 'bo', markersize=marker_size)  # red color and circle marker
+    plt.scatter(forward_stag_streamline[:, 0], forward_stag_streamline[:, 1], color='black', s=marker_size)  # blue color and circle marker
+    # plot the aft stagnation streamline
+    # plt.plot(aft_stag_streamline[:, 0], aft_stag_streamline[:, 1], 'bo', markersize=marker_size)  # red color and circle marker
+    plt.scatter(aft_stag_streamline[:, 0], aft_stag_streamline[:, 1], color='black', s=marker_size)  # blue color and circle marker
     
-    # plot potential lines coming off the lower surface
-    for j in range(len(mesh.lower_coords)):  
-        x_start, y_start = mesh.lower_coords[j, 0], mesh.lower_coords[j, 1]
-        start_point = np.array([x_start, y_start])
-        potential_line_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1, func=mesh.unit_normal_velocity, radial_growth = 1.1)
-        # remove the first point of the potential line, since it is the lower_coords point
-        potential_line_lower = potential_line_lower[1:]
-        plt.plot(potential_line_lower[:, 0], potential_line_lower[:, 1], 'go', markersize=marker_size)  # red color and circle marker
-
-    # plot upper and lower potential lines coming off the forward_stag_streamline array 
-    for i in range(len(forward_stag_streamline)):  
+    # plot upper normal lines extending from the stagnation streamlines
+    # start with the forward stagnation streamline
+    leading_edge_upper_streamlines = []
+    for i in range(len(forward_stag_streamline)):
         x_start, y_start = forward_stag_streamline[i, 0], forward_stag_streamline[i, 1]
         start_point = np.array([x_start, y_start])
-        potential_line_upper_leading_edge = mesh.calc_wrapped_stream_or_potential_line(start_point, 1, func=mesh.unit_normal_velocity)
-        # remove the first point of the potential line, since it is the forward_stag_streamline point
-        potential_line_upper_leading_edge = potential_line_upper_leading_edge[1:]
-        potential_line_lower_leading_edge = mesh.calc_wrapped_stream_or_potential_line(start_point, -1, func=mesh.unit_normal_velocity)
-        # remove the first point of the potential line, since it is the forward_stag_streamline point
-        potential_line_lower_leading_edge = potential_line_lower_leading_edge[1:]
-        plt.plot(potential_line_upper_leading_edge[:, 0], potential_line_upper_leading_edge[:, 1], 'go', markersize=marker_size)  # green color and circle marker
-        plt.plot(potential_line_lower_leading_edge[:, 0], potential_line_lower_leading_edge[:, 1], 'go', markersize=marker_size)
-
-    # plot upper and lower potential lines coming off the aft_stag_streamline array
-    for i in range(len(aft_stag_streamline)):  
+        streamline_leading_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=1.1)[1:]  # skip surface normal point
+        leading_edge_upper_streamlines.append(streamline_leading_edge_upper)
+        # plt.plot(streamline_leading_edge_upper[:, 0], streamline_leading_edge_upper[:, 1], 'ro', markersize=marker_size)  # blue color and circle marker
+        plt.scatter(streamline_leading_edge_upper[:, 0], streamline_leading_edge_upper[:, 1], color='black', s=marker_size)  # blue color and circle marker
+    
+    # # plot upper normal lines extending from the aft stagnation streamline
+    trailing_edge_upper_streamlines = []
+    for i in range(len(aft_stag_streamline)):
         x_start, y_start = aft_stag_streamline[i, 0], aft_stag_streamline[i, 1]
         start_point = np.array([x_start, y_start])
-        potential_line_upper_trailing_edge = mesh.calc_wrapped_stream_or_potential_line(start_point, 1, func=mesh.unit_normal_velocity)
-        # remove the first point of the potential line, since it is the aft_stag_streamline point
-        potential_line_upper_trailing_edge = potential_line_upper_trailing_edge[1:]
-        potential_line_lower_trailing_edge = mesh.calc_wrapped_stream_or_potential_line(start_point, -1, func=mesh.unit_normal_velocity)
-        # remove the first point of the potential line, since it is the aft_stag_streamline point
-        potential_line_lower_trailing_edge = potential_line_lower_trailing_edge[1:]
-        plt.plot(potential_line_upper_trailing_edge[:, 0], potential_line_upper_trailing_edge[:, 1], 'go', markersize=marker_size)  # green color and circle marker
-        plt.plot(potential_line_lower_trailing_edge[:, 0], potential_line_lower_trailing_edge[:, 1], 'go', markersize=marker_size)
+        streamline_trailing_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=1.1)[1:]
+        trailing_edge_upper_streamlines.append(streamline_trailing_edge_upper)
+        # plt.plot(streamline_trailing_edge_upper[:, 0], streamline_trailing_edge_upper[:, 1], 'ro', markersize=marker_size)  # blue color and circle marker
+        plt.scatter(streamline_trailing_edge_upper[:, 0], streamline_trailing_edge_upper[:, 1], color='black', s=marker_size)  # blue color and circle marker
 
+    # plot lower normal lines extending from the stagnation streamlines
+    # start with the forward stagnation streamline
+    leading_edge_lower_streamlines = []
+    for i in range(len(forward_stag_streamline)):
+        x_start, y_start = forward_stag_streamline[i, 0], forward_stag_streamline[i, 1]
+        start_point = np.array([x_start, y_start])
+        streamline_leading_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=1.1)[1:]
+        leading_edge_lower_streamlines.append(streamline_leading_edge_lower)
+        # plt.plot(streamline_leading_edge_lower[:, 0], streamline_leading_edge_lower[:, 1], 'ro', markersize=marker_size)  # red color and circle marker
+        plt.scatter(streamline_leading_edge_lower[:, 0], streamline_leading_edge_lower[:, 1], color='black', s=marker_size)  # red color and circle marker
 
+    # # plot lower normal lines extending from the aft stagnation streamline
+    trailing_edge_lower_streamlines = []
+    for i in range(len(aft_stag_streamline)):
+        x_start, y_start = aft_stag_streamline[i, 0], aft_stag_streamline[i, 1]
+        start_point = np.array([x_start, y_start])
+        streamline_trailing_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=1.1)[1:]
+        trailing_edge_lower_streamlines.append(streamline_trailing_edge_lower)
+        # plt.plot(streamline_trailing_edge_lower[:, 0], streamline_trailing_edge_lower[:, 1], 'ro', markersize=marker_size)
+        plt.scatter(streamline_trailing_edge_lower[:, 0], streamline_trailing_edge_lower[:, 1], color='black', s=marker_size)  # red color and circle marker
 
     plt.show()
 
