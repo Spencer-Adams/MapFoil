@@ -28,8 +28,34 @@ def parse_dictionary_or_return_default(dictionary, keys, default):
     else:
         raise ValueError(f"Key {keys} not found in dictionary and no default value provided.")
     
-def plot_xy_array(xy_array: np.array):
-    plt.plot(xy_array[:, 0], xy_array[:, 1], color='black', linewidth=0.5)
+def plot_xy_array(xy_array: np.array, color: str = 'black', linewidth: float = 0.5):
+    plt.plot(xy_array[:, 0], xy_array[:, 1], color=color, linewidth=linewidth)
+
+def compute_arc_length(points: np.ndarray) -> float:
+    """
+    Compute the arc length of a curve defined by a sequence of points.
+    
+    Args:
+        points: np.ndarray of shape (N, D), where D is typically 2 or 3
+
+    Returns:
+        Total arc length as a float.
+    """
+    # if points.ndim != 2:
+        # raise ValueError("Input must be a 2D array with shape (N, D), where D=2 or D=3.")
+    # if points.shape[1] not in [2, 3]:
+    #     raise ValueError("Each point must be 2D or 3D (i.e., shape (N, 2) or (N, 3)).")
+    # if points.shape[0] < 2:
+        # return 0.0  # Not enough points to define a path
+
+    # Compute differences between consecutive points
+    deltas = np.diff(points, axis=0)
+
+    # Compute Euclidean distances between consecutive points
+    segment_lengths = np.linalg.norm(deltas, axis=1)
+
+    # Sum to get total arc length
+    return np.sum(segment_lengths)
 
 def vector_magnitude(vector: np.array): # Used to help A6 in the project. The streamlines need to be integrated forward using the unit velocity vector
     """
@@ -54,6 +80,36 @@ def unit_vector(vector: np.array): # Used to help A6 in the project. The streaml
     # calculate the unit vector
     unit_vector = [element/magnitude for element in vector]
     return unit_vector
+
+def calc_tangent(main: np.ndarray, prev: np.ndarray, next_: np.ndarray) -> np.ndarray:
+    """
+    Compute an approximate tangent vector at `main` based on the adjacent points.
+    
+    Args:
+        main: np.ndarray of shape (2,), the main point [x, y]
+        prev: np.ndarray of shape (2,), the previous point [x, y]
+        next_: np.ndarray of shape (2,), the next point [x, y]
+
+    Returns:
+        Tangent vector (not yet normalized)
+    """
+    # Tangent is approximated by the vector from prev to next
+    tangent = next_ - prev
+    return tangent
+
+def calc_normal(tangent: np.ndarray) -> np.ndarray:
+    """
+    Compute a normal vector (90 degrees CCW) from a 2D tangent vector.
+
+    Args:
+        tangent: np.ndarray of shape (2,), the tangent vector [dx, dy]
+
+    Returns:
+        Normal vector (not yet normalized)
+    """
+    dx, dy = tangent
+    normal = np.array([-dy, dx])  # Rotate CCW
+    return normal
 
 def rk4(start: np.array, direction: int, step_size: float,  move_off_direction_func: callable, function: callable):
     """This function performs a Runge-Kutta 4th order integration
@@ -94,6 +150,43 @@ def rk4(start: np.array, direction: int, step_size: float,  move_off_direction_f
     point_new = point + (h/6)*(k1 + 2*k2 + 2*k3 + k4)
     point_new = np.array(point_new)
     return point_new
+
+def bisection(f, a, b, tol=1e-8, max_iter=100):
+    """
+    Perform the bisection method to find a root of the function `f` in the interval [a, b].
+
+    Args:
+        f: A callable that accepts a float and returns a float.
+        a: Lower bound of the interval.
+        b: Upper bound of the interval.
+        tol: Desired tolerance for the root (default 1e-8).
+        max_iter: Maximum number of iterations to prevent infinite loops.
+
+    Returns:
+        Approximate root of f in [a, b].
+
+    Raises:
+        ValueError: If f(a) and f(b) do not have opposite signs.
+    """
+    fa = f(a)
+    fb = f(b)
+    
+    if fa * fb > 0:
+        raise ValueError("Function must have opposite signs at the endpoints a and b.")
+
+    for i in range(max_iter):
+        c = 0.5 * (a + b)
+        fc = f(c)
+
+        if abs(fc) < tol or (b - a) < tol:
+            return c
+
+        if fa * fc < 0:
+            b, fb = c, fc
+        else:
+            a, fa = c, fc
+
+    raise RuntimeError("Bisection method did not converge within the maximum number of iterations.")
 
 def sort_points_counterclockwise(points: np.ndarray) -> np.ndarray:
     """

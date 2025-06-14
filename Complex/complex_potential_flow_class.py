@@ -98,8 +98,13 @@ class potential_flow_object:
         lower_surface_normal = [-self.surface_tangent(x_coord)[1][1], self.surface_tangent(x_coord)[1][0]]
         return upper_surface_normal, lower_surface_normal
 
-    def calc_single_streamline(self, start_point: np.array, direction: int):
+    def calc_single_stream_or_potential_line(self, start_point: np.array, direction: int, func=None, total_distance = None):
         """This function calculates the streamline of a given flow field, updating the progress bar based only on x-distance moved."""
+        if func is None:
+            func = self.unit_velocity
+            desc = "Calculating Streamline"
+        else:
+            desc = "Calculating Potential Line"
         # Ensure start_point is a NumPy array with two float elements
         if not isinstance(start_point, np.ndarray) or start_point.shape != (2,) or not np.issubdtype(start_point.dtype, np.floating):
             raise ValueError("The start_point must be a NumPy array of two float values representing x and y coordinates.")
@@ -118,12 +123,13 @@ class potential_flow_object:
             x_limit = self.plot_x_upper_lim
         else:
             raise ValueError("Invalid direction: must be 1 (right) or -1 (left).")
+        
         # print(f"Lower x limit: {self.plot_x_lower_lim}, Upper x limit: {self.plot_x_upper_lim}")
         # Initialize tqdm progress bar based on x-distance only
-        with tqdm(total=x_total_distance, desc="Calculating Streamline", unit="x-distance", dynamic_ncols=True) as pbar:
+        with tqdm(total=x_total_distance, desc=desc, unit="x-distance", dynamic_ncols=True) as pbar:
             while self.plot_x_lower_lim <= point[0] <= self.plot_x_upper_lim:
                 # Perform the RK4 integration step to get the next point on the streamline
-                point_new = hlp.rk4(point, direction, self.plot_delta_s, self.surface_normal, self.unit_velocity)
+                point_new = hlp.rk4(point, direction, self.plot_delta_s, self.surface_normal, func)
                 # Check if the new point will exceed the x_limits
                 if point_new[0] < self.plot_x_lower_lim or point_new[0] > self.plot_x_upper_lim:
                     break  # Stop the integration if the new point goes beyond the x_limits
@@ -152,12 +158,12 @@ class potential_flow_object:
         - shifted_array (np.array): shifted point(s), same shape as input.
         """
         point_xy = np.asarray(point_xy)
-        if point_xy.ndim == 1 and point_xy.shape[0] == 2: # Single point
+        if point_xy.ndim == 1 and point_xy.shape[0] == 2: 
             shifted = np.empty(2)
             shifted[0], shifted[1] = point_xy[0] - self.zeta_center.real - self.leading_edge, point_xy[1] - self.zeta_center.imag
             shifted /= self.trailing_edge
             return shifted
-        elif point_xy.ndim == 2 and point_xy.shape[1] == 2: # Array of points
+        elif point_xy.ndim == 2 and point_xy.shape[1] == 2: 
             shifted = np.empty_like(point_xy)
             shifted[:, 0], shifted[:, 1] = point_xy[:, 0] - self.zeta_center.real - self.leading_edge, point_xy[:, 1] - self.zeta_center.imag
             shifted /= self.trailing_edge
@@ -170,20 +176,44 @@ class potential_flow_object:
         shifted_streamline_points = self.shift_xy_points(streamline_array)
         return shifted_streamline_points
     
-    def unit_velocity(self, point_xy: np.array): # A4 on project
+    def unit_velocity(self, point_xy: np.array):
         """This function calculates the unit velocity at a given point in the flow field in cartesian coordinates."""
         if self.velocity(point_xy, self.circulation)[0] == 0.0 and self.velocity(point_xy, self.circulation)[1] == 0.0:
             velocity = np.array([0.0, 0.0])
         else:
-            velocity = hlp.unit_vector(self.velocity(point_xy, self.circulation))
-        return velocity
+            velocity_unit = hlp.unit_vector(self.velocity(point_xy, self.circulation))
+        return np.array(velocity_unit)
     
-    def stagnation(self):
+    def unit_acceleration(self, point_xy: np.array): 
+        """This function calculates the unit acceleration at a given point in the flow field in cartesian coordinates."""
+        if self.acceleration(point_xy, self.circulation)[0] == 0.0 and self.acceleration(point_xy, self.circulation)[1] == 0.0:
+            acceleration = np.array([0.0, 0.0])
+        else:
+            acceleration_unit = hlp.unit_vector(self.acceleration(point_xy, self.circulation))
+        return acceleration_unit
+    
+    def unit_normal_velocity(self, point_xy: np.array): 
+        """This function calculates the unit normal velocity at a given point in the flow field in cartesian coordinates."""
+        velocity = self.unit_velocity(point_xy)
+        unit_normal_velocity = np.zeros(2)
+        unit_normal_velocity[0] = -velocity[1]
+        unit_normal_velocity[1] = velocity[0]
+        return unit_normal_velocity
+    
+    def unit_potential(self, point_xy: np.array): # A4 on project
+        """This function calculates the unit potential at a given point in the flow field in cartesian coordinates."""
+        if self.potential(point_xy, self.circulation)[0] == 0.0 and self.potential(point_xy, self.circulation)[1] == 0.0:
+            potential = np.array([0.0, 0.0])
+        else:
+            potential = hlp.unit_vector(self.potential(point_xy, self.circulation))
+        return potential
+    
+    def stagnation(self, unit_normal_forward: np.array = np.array([-1e-14,0.0]), unit_normal_aft: np.array = np.array([1e-14,0.0])):
         """This function returns the stagnation point of a cylinder given the velocity field properties."""
         aft_stag_angle = self.calculate_aft_stagnation_theta_in_Chi_from_Gamma(self.circulation)
         forward_stag, aft_stag = self.calculate_forward_and_aft_stag_locations_in_z(aft_stag_angle)
-        forward_stag[0] -= 1e-12 # small adjustment to avoid being exactly where velocity is zero
-        aft_stag[0] += 1e-12 # small adjustment to avoid being exactly where velocity is zero
+        forward_stag += unit_normal_forward # small adjustment to avoid being exactly where velocity is zero
+        aft_stag += unit_normal_aft # small adjustment to avoid being exactly where velocity is zero
         self.forward_stag = forward_stag
         self.aft_stag = aft_stag
         return self.forward_stag, self.aft_stag
@@ -197,8 +227,8 @@ class potential_flow_object:
     def calc_stagnation_streamlines(self):
         """This function calculates the stagnation streamlines for the forward and aft stagnation points."""
         self.forward_stag, self.aft_stag = self.stagnation()
-        self.forward_stag_streamline = self.calc_single_streamline(self.forward_stag, -1)
-        self.aft_stag_streamline = self.calc_single_streamline(self.aft_stag, 1)
+        self.forward_stag_streamline = self.calc_single_stream_or_potential_line(self.forward_stag, -1)
+        self.aft_stag_streamline = self.calc_single_stream_or_potential_line(self.aft_stag, 1)
         return self.forward_stag_streamline, self.aft_stag_streamline
 
     def calc_shifted_streamlines(self, streamlines):
@@ -211,21 +241,21 @@ class potential_flow_object:
         """This function calculates the streamlines for the forward and aft stagnation points."""
         streamlines = []  # Initialize a list to store streamlines
         self.forward_stag, self.aft_stag = self.stagnation()
-        self.forward_stag_streamline = self.calc_single_streamline(self.forward_stag, -1)
+        self.forward_stag_streamline = self.calc_single_stream_or_potential_line(self.forward_stag, -1)
         streamlines.append(self.forward_stag_streamline)  # Add the forward stagnation streamline to the list
-        self.aft_stag_streamline = self.calc_single_streamline(self.aft_stag, 1)
+        self.aft_stag_streamline = self.calc_single_stream_or_potential_line(self.aft_stag, 1)
         streamlines.append(self.aft_stag_streamline)  # Add the aft stagnation streamline to the list
         y_coord = self.forward_stag_streamline[-1][1]  # Get the second to last y coordinate of the forward stagnation streamline
         for i in range(int(self.plot_n_lines)):
             y_coord += self.plot_delta_y
             # Plot the streamlines above the forward stagnation streamline
-            streamline = self.calc_single_streamline(np.array([self.plot_x_start, y_coord]), 1)
+            streamline = self.calc_single_stream_or_potential_line(np.array([self.plot_x_start, y_coord]), 1)
             streamlines.append(streamline)
         y_coord = self.forward_stag_streamline[-1][1]  # Get the last y coordinate of the forward stagnation streamline
         for j in range(int(self.plot_n_lines)):
             y_coord -= self.plot_delta_y
             # Plot the streamlines below the forward stagnation streamline
-            streamline = self.calc_single_streamline(np.array([self.plot_x_start, y_coord]), 1)
+            streamline = self.calc_single_stream_or_potential_line(np.array([self.plot_x_start, y_coord]), 1)
             streamlines.append(streamline)
         return streamlines
 

@@ -359,6 +359,14 @@ class cylinder(potential_flow_object):
         """"""
         return 2*(1-self.D)/(1+self.D)*(self.C**2)/(zeta)**3
     
+    def potential(self, point_xi_eta_in_z_plane, Gamma, C = 0.0):
+        """This function calculates the potential at a given point in the flow field in the z plane"""
+        z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
+        zeta = self.z_to_zeta(z, self.epsilon)
+        Potential = self.freestream_velocity*(zeta*np.exp(-1j*self.angle_of_attack) + 1j*Gamma/(2*np.pi*self.freestream_velocity)*np.log(zeta-self.zeta_center) + np.exp(1j*self.angle_of_attack)*self.cylinder_radius**2/(zeta-self.zeta_center)) + C
+        Potential_complex = np.array([Potential.real, Potential.imag])  # the minus sign is because we are using the complex potential
+        return Potential_complex
+    
     def velocity(self, point_xi_eta_in_z_plane, Gamma):
         """This function calculates the velocity at a given point in the flow field in the z plane"""
         z = point_xi_eta_in_z_plane[0] + 1j*point_xi_eta_in_z_plane[1]
@@ -1343,11 +1351,11 @@ class cylinder(potential_flow_object):
         pressure = 1-(V_squared/self.freestream_velocity**2)
         return pressure
     
-    def given_geom_zeta_calc_top_and_bottom_coords(self, theta_aft, theta_forward, zeta_geom_array):
+    def given_geom_and_stag_thetas_calc_top_and_bottom_coords(self, theta_aft, theta_forward, zeta_geom_array):
         """This function calculates the upper and lower coordinates of the Joukowski cylinder given the geometry in zeta coordinates"""
         # any points between theta_start and theta_half that are within the first half of zeta_geom_array are upper coords, the rest are lower coords
-        self.upper_coords = zeta_geom_array[(zeta_geom_array[:, 2] >= theta_aft) & (zeta_geom_array[:, 2] <= theta_forward), :2] # spits out the upper zeta_geom_array coordinates which satisfy the conditions of being greater than or equal to theta_aft and less than or equal to theta_forward
-        self.lower_coords = zeta_geom_array[(zeta_geom_array[:, 2] > theta_forward) & (zeta_geom_array[:, 2] <= 2*np.pi + theta_aft), :2] # spits out the lower zeta_geom_array coordinates which satisfy the conditions of being greater than theta_forward and less than or equal to 2*np.pi + theta_aft
+        self.upper_coords = zeta_geom_array[(zeta_geom_array[:, 2] >= theta_aft) & (zeta_geom_array[:, 2] <= theta_forward), :2] # the theta aft is included, the theta forward is not included
+        self.lower_coords = zeta_geom_array[(zeta_geom_array[:, 2] > theta_forward) & (zeta_geom_array[:, 2] <= 2*np.pi + theta_aft), :2] # theta aft is not included, theta forward is included
         return self.upper_coords, self.lower_coords
     
     def given_geom_zeta_upper_lower_get_z_upper_lower(self, upper_coords, lower_coords):
@@ -1390,7 +1398,7 @@ class cylinder(potential_flow_object):
         self.get_full_geometry_zeta(number_of_points = self.output_points, theta_start = theta_aft, theta_half = theta_forward, theta_end = 2*np.pi + theta_aft)
         zeta_geom_array = self.zeta_geom_array
         # any points between theta_start and theta_half that are within the first half of zeta_geom_array are upper coords, the rest are lower coords
-        self.upper_coords, self.lower_coords = self.given_geom_zeta_calc_top_and_bottom_coords(theta_aft, theta_forward, zeta_geom_array)
+        self.upper_coords, self.lower_coords = self.given_geom_and_stag_thetas_calc_top_and_bottom_coords(theta_aft, theta_forward, zeta_geom_array)
         pressures_upper = np.zeros((len(self.upper_coords), 2))
         pressures_lower = np.zeros((len(self.lower_coords), 2))
         self.shifted_z_surface = self.shift_joukowski_cylinder()
@@ -1739,7 +1747,7 @@ if __name__ == "__main__":
     print("Aft Stagnation Theta in Chi: ", np.rad2deg(theta_aft))
     print("Forward Stagnation Theta in Chi: ", np.rad2deg(theta_forward))
     # now get the upper and lower zeta coordinates
-    # upper_coords, lower_coords = cyl.given_geom_zeta_calc_top_and_bottom_coords(theta_aft, theta_forward, cyl.zeta_geom_array)
+    # upper_coords, lower_coords = cyl.given_geom_and_stag_thetas_calc_top_and_bottom_coords(theta_aft, theta_forward, cyl.zeta_geom_array)
     # now get the upper and lower z coordinates
     # z_upper, z_lower = cyl.given_geom_zeta_upper_lower_get_z_upper_lower(upper_coords, lower_coords)
 

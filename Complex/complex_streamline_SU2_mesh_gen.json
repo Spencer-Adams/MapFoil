@@ -5,16 +5,15 @@
         "is_export_mesh" : true,
         "mesh_filename" : "/txt_files/mesh_files/full_mesh/Testing_mesh.txt",
         "cylinder_radius" : 1.0,
-        "shape_parameter_D" : 0.001,
+        "shape_parameter_D" : 0.0001,
         "zeta_0" : [-0.09, 0.0],
-        "surface_nodes" : 100,
-        "wake_nodes" : 5,
-        "radial_nodes" : 100,
-        "radial_distance" : 10,
+        "surface_nodes" : 60,
+        "radial_nodes" : 60,
+        "radial_distance" : 6,
         "radial_growth" : 1.1
     },
     "operating" : {
         "freestream_velocity" : 10.0,
-        "angle_of_attack[deg]" : 5.0
+        "angle_of_attack[deg]" : 0.0
     }
 }
