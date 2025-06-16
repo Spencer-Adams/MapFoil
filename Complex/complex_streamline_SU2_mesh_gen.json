@@ -2,14 +2,15 @@
     "mesh" : {
         "is_generate_mesh" : true,
         "is_visualize_mesh" : true,
+        "is_visualize_node_integers" : true,
         "is_export_mesh" : true,
         "mesh_filename" : "/txt_files/mesh_files/full_mesh/Testing_mesh.txt",
         "cylinder_radius" : 1.0,
         "shape_parameter_D" :0.001,
-        "zeta_0" : [-0.09, 0.09],
-        "surface_nodes" : 100,
-        "radial_nodes" : 50,
-        "radial_distance" : 6,
+        "zeta_0" : [-0.09, 0.0],
+        "surface_nodes" : 6,
+        "radial_nodes" : 6,
+        "radial_distance" : 4.0,
         "radial_growth" : 1.1
     },
     "operating" : {

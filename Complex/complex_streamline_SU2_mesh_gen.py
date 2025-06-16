@@ -35,6 +35,7 @@ class mesh_generation_object(cylinder, vort_panel):
             input = json.load(json_handle)
             self.is_generate_mesh = hlp.parse_dictionary_or_return_default(input, ["mesh", "is_generate_mesh"], True)
             self.is_visualize_mesh = hlp.parse_dictionary_or_return_default(input, ["mesh", "is_visualize_mesh"], True)
+            self.is_visualize_node_integers = hlp.parse_dictionary_or_return_default(input, ["mesh", "is_visualize_node_integers"], False)
             self.is_export_mesh = hlp.parse_dictionary_or_return_default(input, ["mesh", "is_export_mesh"], True)
             self.surface_nodes = hlp.parse_dictionary_or_return_default(input, ["mesh", "surface_nodes"], 100)
             self.radial_nodes = hlp.parse_dictionary_or_return_default(input, ["mesh", "radial_nodes"], 100)
@@ -94,9 +95,6 @@ class mesh_generation_object(cylinder, vort_panel):
         """Calculate a streamline or potential line until the desired arc length is reached."""
         if func is None:
             func = self.unit_velocity
-            desc = "Calculating Streamline"
-        else:
-            desc = "Calculating Potential Line"
         # Ensure valid start_point
         if not isinstance(start_point, np.ndarray) or start_point.shape != (2,) or not np.issubdtype(start_point.dtype, np.floating):
             raise ValueError("The start_point must be a NumPy array of two float values representing x and y coordinates.")
@@ -104,27 +102,21 @@ class mesh_generation_object(cylinder, vort_panel):
         streamline_points = [point]
         i = 0
         max_iter = 10000
-        # Use absolute arc length as the total distance to travel
         total_distance = self.radial_distance
-        with tqdm(total=total_distance, desc=desc, unit="arc-length", dynamic_ncols=True) as pbar:
-            while True:
-                # Take RK4 step
-                point_new = hlp.rk4(point, direction, self.plot_delta_s, self.surface_normal, func)
-                # Stop if new point is outside x bounds
-                if point_new[0] < self.plot_x_lower_lim or point_new[0] > self.plot_x_upper_lim:
-                    break
-                streamline_points.append(point_new)
-                # Compute total arc length covered so far
-                arc_length_covered = hlp.compute_arc_length(streamline_points)
-                # Update progress bar with how much new arc length was added
-                remaining_distance = total_distance - pbar.n
-                update_distance = min(arc_length_covered - pbar.n, remaining_distance)
-                pbar.update(update_distance)
-                # Check termination condition
-                if arc_length_covered >= total_distance or i > max_iter:
-                    break
-                point = point_new
-                i += 1
+        while True:
+            # Take RK4 step
+            point_new = hlp.rk4(point, direction, self.plot_delta_s, self.surface_normal, func)
+            # Stop if new point is outside x bounds
+            if point_new[0] < self.plot_x_lower_lim or point_new[0] > self.plot_x_upper_lim:
+                break
+            streamline_points.append(point_new)
+            # Compute total arc length covered so far
+            arc_length_covered = hlp.compute_arc_length(streamline_points)
+            # Check termination condition
+            if arc_length_covered >= total_distance or i > max_iter:
+                break
+            point = point_new
+            i += 1
         return np.array(streamline_points)
     
     def calc_wrapped_stream_or_potential_line(self, start_point: np.array, direction: int, psi_targets=None, func=None, radial_growth=None):
@@ -308,13 +300,6 @@ class mesh_generation_object(cylinder, vort_panel):
         # move the forward and aft stagnation points in their unit normal direction by 1e-12 to avoid numerical issues
         # self.forward_stag += 1e-12 * forward_stag_unit_normal
         # self.aft_stag += 1e-12 * aft_stag_unit_normal
-        if self.is_visualize_mesh:
-            plt.scatter(self.upper_coords[:, 0], self.upper_coords[:, 1], color='blue', label='Upper Points', s=0.1)
-            plt.scatter(self.lower_coords[:, 0], self.lower_coords[:, 1], color='red', label='Lower Points', s=0.1)
-            # for i in range(len(self.upper_coords)):
-            #     plt.text(self.upper_coords[i, 0] + 0.05, self.upper_coords[i, 1] - 0.05, str(int(self.upper_coords[i, 2])), fontsize=8, color='black')
-            # for j in range(len(self.lower_coords)):
-            #     plt.text(self.lower_coords[j, 0] + 0.05, self.lower_coords[j, 1] - 0.05, str(int(self.lower_coords[j, 2])), fontsize=8, color='black')
         self.inner_boundary_mesh = np.concatenate((self.upper_coords, self.lower_coords), axis=0)
         self.last_body_index = self.lower_coords[-1, 2]  # this is the last index of the lower surface
     
@@ -328,8 +313,8 @@ class mesh_generation_object(cylinder, vort_panel):
         mesh.plot_x_start = mesh.plot_x_lower_lim
         # re-define radial_distance to be plot_y_upper_lim 
         mesh.radial_distance = mesh.plot_y_upper_lim
-        plt.xlim(-self.radial_distance-5, self.radial_distance+5)
-        plt.ylim(-self.radial_distance-5, self.radial_distance+5)
+        plt.xlim(-self.radial_distance-10, self.radial_distance+10)
+        plt.ylim(-self.radial_distance-10, self.radial_distance+10)
     
     def plot_mesh(self):
         """"""
@@ -368,6 +353,43 @@ class mesh_generation_object(cylinder, vort_panel):
         # Sort by angle to get CCW order
         sorted_idx = np.argsort(angles)
         return indices[sorted_idx]
+    
+    def make_N_by_2_an_N_by_three(self, array: np.ndarray, starting_index: int) -> np.ndarray:
+        """
+        Converts an N by 2 array to an N by 3 array by adding an index column.
+        The index starts at starting_index and increments by 1 for each row.
+        
+        Parameters:
+            array (np.ndarray): An N by 2 numpy array.
+            starting_index (int): The starting index for the new column.
+        
+        Returns:
+            np.ndarray: An N by 3 numpy array with the last column as indices.
+        """
+        starting_index += 1  # Adjust starting index to start from 1
+        if array.ndim != 2 or array.shape[1] != 2:
+            raise ValueError("Input must be an N by 2 numpy array.")
+        indices = (np.arange(array.shape[0]) + starting_index).reshape(-1, 1)
+        return np.hstack((array, indices))
+    
+    def plot_cell(self, four_element_array: np.ndarray,  linewidth: float = 0.5):
+        """
+        Plots a cell defined by 4 points in a 2D array.
+        
+        Parameters:
+            four_element_array (np.ndarray): An array of shape (4, 2) representing the vertices of the cell.
+            color (str): Color of the cell.
+            alpha (float): Transparency level of the cell.
+            linewidth (float): Width of the cell edges.
+        """
+        # connect the first point to the second point
+        plt.plot([four_element_array[0, 0], four_element_array[1, 0]], [four_element_array[0, 1], four_element_array[1, 1]], color="blue", linewidth=linewidth)  # plot the first line as blue
+        # connect the second point to the third point
+        plt.plot([four_element_array[1, 0], four_element_array[2, 0]], [four_element_array[1, 1], four_element_array[2, 1]], color="green", linewidth=linewidth)  # plot the second line as green
+        # connect the third point to the fourth point
+        plt.plot([four_element_array[2, 0], four_element_array[3, 0]], [four_element_array[2, 1], four_element_array[3, 1]], color="red", linewidth=linewidth)  # plot the third line as red
+        # now connect the fourth point to the first point
+        plt.plot([four_element_array[0, 0], four_element_array[-1, 0]], [four_element_array[0, 1], four_element_array[-1, 1]], color="orange", linewidth=linewidth)
 
 if __name__ == "__main__":
 
@@ -406,95 +428,324 @@ if __name__ == "__main__":
     midline_start_points = mesh.create_body_mesh()
     
     marker_size = 0.1
-
-    # upper midline
+    last_body_index = mesh.last_body_index
+    #### streamlines geometrically spaced from the stagnation points
+    forward_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1)[1:]
+    forward_stag_streamline = mesh.make_N_by_2_an_N_by_three(forward_stag_streamline, last_body_index)  # add index column starting from last_body_index + 1
+    last_index_forward_stag = forward_stag_streamline[-1, 2]  # last index of the forward stagnation streamline
+    aft_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, 1)[1:]
+    aft_stag_streamline = mesh.make_N_by_2_an_N_by_three(aft_stag_streamline, last_index_forward_stag)  # add index column starting from last_index_forward_stag + 1
+    last_index_aft_stag = aft_stag_streamline[-1, 2]  # last index of the aft stagnation streamline
+    #### upper midline ####
     upper_midline = mesh.calc_wrapped_stream_or_potential_line(mesh.closest_upper_point[:2],direction=1,psi_targets=None,func=mesh.unit_normal_velocity)[1:]  # drop the first point (which is the surface point)
-    # Plot the midline potential line
-    # plt.plot(upper_midline[:, 0], upper_midline[:, 1], 'bo', markersize=marker_size)  # blue color and circle marker
-    plt.scatter(upper_midline[:, 0], upper_midline[:, 1], color='black', s=marker_size)  # blue color and circle marker
-    # Compute ψ values along this midline
     upper_stream_function_values = np.array([mesh.stream_function(p) for p in upper_midline])
-    # For each other upper surface point, generate potential lines that match the ψ levels found above
     matched_upper_lines = []
-    for i in range(len(mesh.upper_coords)):
-        if not np.allclose(mesh.upper_coords[i, :2], mesh.closest_upper_point[:2]):
+    last_index_upper_midline = last_index_aft_stag 
+    for i in tqdm(range(len(mesh.upper_coords)), desc="Calculating Upper Surface Potential Lines", unit="line"):
+        if not np.allclose(mesh.upper_coords[i, :2], mesh.closest_upper_point[:2]): # check if the point is not the closest upper point, the :2 means we only take the first two coordinates (x and y)
             start_point = mesh.upper_coords[i, :2]
             matched_line = mesh.calc_wrapped_stream_or_potential_line(start_point,direction=1,psi_targets=upper_stream_function_values,func=mesh.unit_normal_velocity)[1:]  # skip surface point again
+            matched_line = mesh.make_N_by_2_an_N_by_three(matched_line, last_index_upper_midline)  # add index column starting from last_index + 1
+            last_index_upper_midline = matched_line[-1, 2]  # update the last index of the upper midline
             matched_upper_lines.append(matched_line)
-            plt.scatter(matched_line[:, 0], matched_line[:, 1], color="black", s=marker_size)
-            # plt.plot(matched_line[:, 0], matched_line[:, 1], 'go', markersize=marker_size)
-
-    # lower midline
+        else:
+            upper_midline = mesh.make_N_by_2_an_N_by_three(upper_midline, last_index_upper_midline)  # add index column starting from last_index_aft_stag + 1
+            matched_upper_lines.append(upper_midline)
+            last_index_upper_midline = upper_midline[-1, 2]  # update the last index of the upper midline
+    last_upper_midline_index = last_index_upper_midline 
+    #### lower midline ####
     lower_midline = mesh.calc_wrapped_stream_or_potential_line(mesh.closest_lower_point[:2],direction=-1,psi_targets=None,func=mesh.unit_normal_velocity)[1:]  # drop the first point (which is the surface point)
-    # Plot the midline potential line
-    # plt.plot(lower_midline[:, 0], lower_midline[:, 1], 'ro', markersize=marker_size)  # red color and circle marker
-    plt.scatter(lower_midline[:, 0], lower_midline[:, 1], color='black', s=marker_size)  # blue color and circle marker
-    # Compute ψ values along this midline
     lower_stream_function_values = np.array([mesh.stream_function(p) for p in lower_midline])
-    # For each other lower surface point, generate potential lines that match the ψ levels found above
     matched_lower_lines = []
-    for j in range(len(mesh.lower_coords)):
+    last_index_lower_midline = last_upper_midline_index  # start from the last index of the upper midline
+    for j in tqdm(range(len(mesh.lower_coords)), desc="Calculating Lower Surface Potential Lines", unit="line"):
         if not np.allclose(mesh.lower_coords[j, :2], mesh.closest_lower_point[:2]):
             start_point = mesh.lower_coords[j, :2]
             matched_line = mesh.calc_wrapped_stream_or_potential_line(start_point,direction=-1,psi_targets=lower_stream_function_values,func=mesh.unit_normal_velocity)[1:]
+            matched_line = mesh.make_N_by_2_an_N_by_three(matched_line, last_index_lower_midline)  # add index column starting from last_index_lower_midline + 1
+            last_index_lower_midline = matched_line[-1, 2]  # update the last index of the lower midline
             matched_lower_lines.append(matched_line)
-            # plt.plot(matched_line[:, 0], matched_line[:, 1], 'go', markersize=marker_size)  # green color and circle marker
-            plt.scatter(matched_line[:, 0], matched_line[:, 1], color='black', s=marker_size)
-
-    # create geometrically spaced streamlines from the stagnation points
-    forward_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1)[1:]
-    aft_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, 1)[1:]
-    # plot the forward stagnation streamline
-    # plt.plot(forward_stag_streamline[:, 0], forward_stag_streamline[:, 1], 'bo', markersize=marker_size)  # red color and circle marker
-    plt.scatter(forward_stag_streamline[:, 0], forward_stag_streamline[:, 1], color='black', s=marker_size)  # blue color and circle marker
-    # plot the aft stagnation streamline
-    # plt.plot(aft_stag_streamline[:, 0], aft_stag_streamline[:, 1], 'bo', markersize=marker_size)  # red color and circle marker
-    plt.scatter(aft_stag_streamline[:, 0], aft_stag_streamline[:, 1], color='black', s=marker_size)  # blue color and circle marker
-    
-    # plot upper normal lines extending from the stagnation streamlines
-    # start with the forward stagnation streamline
-    leading_edge_upper_streamlines = []
-    for i in range(len(forward_stag_streamline)):
+        else:
+            lower_midline = mesh.make_N_by_2_an_N_by_three(lower_midline, last_index_lower_midline)  # add index column starting from last_index_lower_midline + 1
+            matched_lower_lines.append(lower_midline)
+            last_index_lower_midline = lower_midline[-1, 2]
+    last_lower_midline_index = last_index_lower_midline  # this is the last index of the lower midline
+    #### calculate normal lines extending downward from the stagnation points ####
+    lower_stag_potential_forward = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1, psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface point
+    lower_stag_potential_forward = mesh.make_N_by_2_an_N_by_three(lower_stag_potential_forward, last_lower_midline_index) 
+    last_index_lower_potential_forward = lower_stag_potential_forward[-1, 2]  # last index of the lower stagnation potential line
+    lower_stag_potential_aft = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, -1, psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface point
+    lower_stag_potential_aft = mesh.make_N_by_2_an_N_by_three(lower_stag_potential_aft, last_index_lower_potential_forward)  # add index column starting from last_index_lower_potential_forward + 1
+    last_index_lower_potential_aft = lower_stag_potential_aft[-1, 2]  # last index of the lower stagnation potential line
+    #### forward stagnation potential lines extending from the forward stagnation streamline ####
+    leading_edge_upper_potential_lines = []
+    index_leading_edge_upper = last_index_lower_potential_aft
+    for i in tqdm(range(len(forward_stag_streamline)), desc="Calculating Leading Edge Upper Potential Lines", unit="streamline"):
         x_start, y_start = forward_stag_streamline[i, 0], forward_stag_streamline[i, 1]
         start_point = np.array([x_start, y_start])
-        streamline_leading_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=1.1)[1:]  # skip surface normal point
-        leading_edge_upper_streamlines.append(streamline_leading_edge_upper)
-        # plt.plot(streamline_leading_edge_upper[:, 0], streamline_leading_edge_upper[:, 1], 'ro', markersize=marker_size)  # blue color and circle marker
-        plt.scatter(streamline_leading_edge_upper[:, 0], streamline_leading_edge_upper[:, 1], color='black', s=marker_size)  # blue color and circle marker
-    
-    # # plot upper normal lines extending from the aft stagnation streamline
-    trailing_edge_upper_streamlines = []
-    for i in range(len(aft_stag_streamline)):
+        potential_line_leading_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface normal point
+        potential_line_leading_edge_upper = mesh.make_N_by_2_an_N_by_three(potential_line_leading_edge_upper, index_leading_edge_upper)  # add index column starting from first_index_leading_edge_upper + 1
+        index_leading_edge_upper = potential_line_leading_edge_upper[-1, 2]  # update the last index of the leading edge upper potential line
+        leading_edge_upper_potential_lines.append(potential_line_leading_edge_upper)
+    last_index_leading_edge_upper = index_leading_edge_upper  # this is the last index of the leading edge upper potential lines
+    #### upper normal lines extending from the aft stagnation streamline ####
+    trailing_edge_upper_potential_lines = []
+    index_trailing_edge_upper = last_index_leading_edge_upper
+    for i in tqdm(range(len(aft_stag_streamline)), desc="Calculating Trailing Edge Upper Potential Lines", unit="streamline"):
         x_start, y_start = aft_stag_streamline[i, 0], aft_stag_streamline[i, 1]
         start_point = np.array([x_start, y_start])
-        streamline_trailing_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=1.1)[1:]
-        trailing_edge_upper_streamlines.append(streamline_trailing_edge_upper)
-        # plt.plot(streamline_trailing_edge_upper[:, 0], streamline_trailing_edge_upper[:, 1], 'ro', markersize=marker_size)  # blue color and circle marker
-        plt.scatter(streamline_trailing_edge_upper[:, 0], streamline_trailing_edge_upper[:, 1], color='black', s=marker_size)  # blue color and circle marker
-
-    # plot lower normal lines extending from the stagnation streamlines
-    # start with the forward stagnation streamline
-    leading_edge_lower_streamlines = []
-    for i in range(len(forward_stag_streamline)):
+        potential_line_trailing_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
+        potential_line_trailing_edge_upper = mesh.make_N_by_2_an_N_by_three(potential_line_trailing_edge_upper, index_trailing_edge_upper)  # add index column starting from first_index_trailing_edge_upper + 1
+        index_trailing_edge_upper = potential_line_trailing_edge_upper[-1, 2]  # last index of the trailing edge upper potential line
+        trailing_edge_upper_potential_lines.append(potential_line_trailing_edge_upper)
+    last_index_trailing_edge_upper = index_trailing_edge_upper  # this is the last index of the trailing edge upper potential lines
+    #### lower normal lines extending from the stagnation streamlines starting with the forward stagnation streamline ####
+    leading_edge_lower_potential_lines = []
+    index_leading_edge_lower = last_index_trailing_edge_upper
+    for i in tqdm(range(len(forward_stag_streamline)), desc="Calculating Leading Edge Lower Potential Lines", unit="streamline"):
         x_start, y_start = forward_stag_streamline[i, 0], forward_stag_streamline[i, 1]
         start_point = np.array([x_start, y_start])
-        streamline_leading_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=1.1)[1:]
-        leading_edge_lower_streamlines.append(streamline_leading_edge_lower)
-        # plt.plot(streamline_leading_edge_lower[:, 0], streamline_leading_edge_lower[:, 1], 'ro', markersize=marker_size)  # red color and circle marker
-        plt.scatter(streamline_leading_edge_lower[:, 0], streamline_leading_edge_lower[:, 1], color='black', s=marker_size)  # red color and circle marker
-
-    # # plot lower normal lines extending from the aft stagnation streamline
-    trailing_edge_lower_streamlines = []
-    for i in range(len(aft_stag_streamline)):
+        potential_line_leading_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
+        potential_line_leading_edge_lower = mesh.make_N_by_2_an_N_by_three(potential_line_leading_edge_lower, index_leading_edge_lower)  # add index column starting from first_index_leading_edge_lower + 1
+        index_leading_edge_lower = potential_line_leading_edge_lower[-1, 2]  # update the last index of the leading edge lower potential line
+        leading_edge_lower_potential_lines.append(potential_line_leading_edge_lower)
+    last_index_leading_edge_lower = index_leading_edge_lower  # this is the last index of the leading edge lower potential lines
+    ####lower normal lines extending from the aft stagnation streamline
+    trailing_edge_lower_potential_lines = []
+    index_trailing_edge_lower = last_index_leading_edge_lower
+    for i in tqdm(range(len(aft_stag_streamline)), desc="Calculating Trailing Edge Lower Potential Lines", unit="streamline"):
         x_start, y_start = aft_stag_streamline[i, 0], aft_stag_streamline[i, 1]
         start_point = np.array([x_start, y_start])
-        streamline_trailing_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=1.1)[1:]
-        trailing_edge_lower_streamlines.append(streamline_trailing_edge_lower)
-        # plt.plot(streamline_trailing_edge_lower[:, 0], streamline_trailing_edge_lower[:, 1], 'ro', markersize=marker_size)
-        plt.scatter(streamline_trailing_edge_lower[:, 0], streamline_trailing_edge_lower[:, 1], color='black', s=marker_size)  # red color and circle marker
+        potential_line_trailing_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
+        potential_line_trailing_edge_lower = mesh.make_N_by_2_an_N_by_three(potential_line_trailing_edge_lower, index_trailing_edge_lower)  # add index column starting from first_index_trailing_edge_lower + 1
+        index_trailing_edge_lower = potential_line_trailing_edge_lower[-1, 2]  # last index of the trailing edge lower potential line
+        trailing_edge_lower_potential_lines.append(potential_line_trailing_edge_lower)
+    last_index_trailing_edge_lower = index_trailing_edge_lower  # this is the last index of the trailing edge lower potential lines
 
-    plt.show()
 
+    #### now we have all the points, start connecting them into cells starting with the upper surface which connects to forward_stag_streamline, matched_upper_lines, and the first lines in leading_edge_upper_potential_lines and trailing_edge_upper_potential_lines
+    cells = [] # will contain the cells (4 indices each) on (directly touching) or right next to, the body mesh
+    cell_one = np.array(([mesh.upper_coords[0], aft_stag_streamline[0], trailing_edge_upper_potential_lines[0][0], matched_upper_lines[0][0]]))
+    cells.append(cell_one)  # first cell is the first point of the upper surface, the first point of the aft stagnation streamline, the first point of the matched upper line, and the first point of the leading edge upper potential line
+
+    #### now loop through the upper surface points and connect them to the adjacent surface point and the appropriate matched upper line 
+    for i in range(1, len(mesh.upper_coords)):
+        # connect the upper surface point to the next point in the upper surface, the next point in the aft stagnation streamline, the next point in the matched upper line, and the next point in the leading edge upper potential line
+        cell = np.array(([mesh.upper_coords[i], mesh.upper_coords[i-1], matched_upper_lines[i-1][0], matched_upper_lines[i][0]]))
+        cells.append(cell)
+    
+    #### now connect the last point of the upper surface to the first point of the forward stagnation streamline, the first point of the matched upper line, and the first point of the leading edge upper potential line
+    cell_last_upper = np.array(([forward_stag_streamline[0], mesh.upper_coords[-1],  matched_upper_lines[-1][0], leading_edge_upper_potential_lines[0][0]]))
+    cells.append(cell_last_upper)  # last cell is the first point of the forward stagnation streamline, the last point of the upper surface, the last point of the matched upper line, and the first point of the leading edge upper potential line
+    #### now connect the lower surface points 
+    cell_one_lower = np.array(([leading_edge_lower_potential_lines[0][0], lower_stag_potential_forward[0], mesh.upper_coords[-1], forward_stag_streamline[0]]))
+    cells.append(cell_one_lower)  # first cell is the first point of the lower stagnation potential line, the first point of the trailing edge lower potential line, the first point of the aft stagnation streamline, and the first point of the upper surface
+    cell_two_lower = np.array(([lower_stag_potential_forward[0], matched_lower_lines[0][0],  mesh.lower_coords[0], mesh.upper_coords[-1]]))
+    cells.append(cell_two_lower)  # second cell is the first point of the matched lower line, the first point of the lower stagnation potential line, the first point of the upper surface, and the first point of the lower surface
+    
+    #### now loop through the lower surface points and connect them to the adjacent surface point and the appropriate matched lower line
+    for i in range(1, len(mesh.lower_coords)):
+        # connect the lower surface point to the next point in the lower surface, the next point in the matched lower line, and the next point in the trailing edge lower potential line
+        cell = np.array(([matched_lower_lines[i-1][0], matched_lower_lines[i][0], mesh.lower_coords[i], mesh.lower_coords[i-1]]))
+        cells.append(cell)
+
+    #### now get the second to last and last cells in the lower surface
+    cell_second_last_lower = np.array(([matched_lower_lines[-1][0], lower_stag_potential_aft[0], mesh.upper_coords[0], mesh.lower_coords[-1]]))
+    cells.append(cell_second_last_lower)  # second to last cell is the last point of the matched lower line, the first point of the lower stagnation potential line, the first point of the upper surface, and the last point of the lower surface
+
+    #### now for the last body cell
+    cell_last_lower = np.array(([lower_stag_potential_aft[0], trailing_edge_lower_potential_lines[0][0], aft_stag_streamline[0], mesh.upper_coords[0]]))
+    cells.append(cell_last_lower)  # last cell is the first point of the lower stagnation potential line, the first point of the trailing edge lower potential line, the first point of the aft stagnation streamline, and the first point of the upper surface
+
+    #### now create cells on the forward stagnation streamline (above and below the streamline)
+    for i in range(len(forward_stag_streamline)-1):
+        upper_cell = np.array(([forward_stag_streamline[i + 1], forward_stag_streamline[i], leading_edge_upper_potential_lines[i][0], leading_edge_upper_potential_lines[i + 1][0]]))
+        cells.append(upper_cell)  # upper cell is the next point in the forward stagnation streamline, the current point in the forward stagnation streamline, the next point in the leading edge upper potential line, and the next point in the leading edge upper potential line
+        lower_cell = np.array(([leading_edge_lower_potential_lines[i+1][0], leading_edge_lower_potential_lines[i][0], forward_stag_streamline[i], forward_stag_streamline[i + 1]]))
+        cells.append(lower_cell)  # lower cell is the next point in the leading edge lower potential line, the current point in the leading edge lower potential line, the current point in the forward stagnation streamline, and the next point in the forward stagnation streamline
+    #### now create cells on the aft stagnation streamline (above and below the streamline)
+    for i in range(len(aft_stag_streamline)-1):
+        upper_cell = np.array(([aft_stag_streamline[i], aft_stag_streamline[i + 1], trailing_edge_upper_potential_lines[i+1][0], trailing_edge_upper_potential_lines[i][0]]))
+        cells.append(upper_cell)  # upper cell is the current point in the aft stagnation streamline, the next point in the aft stagnation streamline, the next point in the trailing edge upper potential line, and the current point in the trailing edge upper potential line
+        lower_cell = np.array(([trailing_edge_lower_potential_lines[i][0], trailing_edge_lower_potential_lines[i + 1][0], aft_stag_streamline[i + 1], aft_stag_streamline[i]]))
+        cells.append(lower_cell)  # lower cell is the current point in the trailing edge lower potential line, the next point in the trailing edge lower potential line, the next point in the aft stagnation streamline, and the current point in the aft stagnation streamline
+    #### create cells on the upper and lower potential lines. Start with the leading edge upper potential lines
+    for i in range(len(leading_edge_upper_potential_lines)-1):
+        for j in range(len(leading_edge_upper_potential_lines[i])-1):
+            upper_cell = np.array(([leading_edge_upper_potential_lines[i+1][j], leading_edge_upper_potential_lines[i][j], leading_edge_upper_potential_lines[i][j+1], leading_edge_upper_potential_lines[i+1][j+1]]))
+            cells.append(upper_cell)  # upper cell is the next point in the leading edge upper potential line, the current point in the leading edge upper potential line, the current point in the next point in the leading edge upper potential line, and the next point in the next point in the leading edge upper potential line
+    #### make cells in a similar fashion for the leading edge lower potential lines
+    for i in range(len(leading_edge_lower_potential_lines)-1):
+        for j in range(len(leading_edge_lower_potential_lines[i])-1):
+            lower_cell = np.array(([leading_edge_lower_potential_lines[i+1][j+1], leading_edge_lower_potential_lines[i][j+1], leading_edge_lower_potential_lines[i][j], leading_edge_lower_potential_lines[i+1][j]]))
+            cells.append(lower_cell)
+    #### now do the same for the trailing edge upper potential lines
+    for i in range(len(trailing_edge_upper_potential_lines)-1):
+        for j in range(len(trailing_edge_upper_potential_lines[i])-1):
+            upper_cell = np.array(([trailing_edge_upper_potential_lines[i][j], trailing_edge_upper_potential_lines[i+1][j], trailing_edge_upper_potential_lines[i+1][j+1], trailing_edge_upper_potential_lines[i][j+1]]))
+            cells.append(upper_cell)     
+    #### do the same for the trailing edge lower potential lines
+    for i in range(len(trailing_edge_lower_potential_lines)-1):
+        for j in range(len(trailing_edge_lower_potential_lines[i])-1):
+            lower_cell = np.array(([trailing_edge_lower_potential_lines[i][j+1], trailing_edge_lower_potential_lines[i+1][j+1], trailing_edge_lower_potential_lines[i+1][j], trailing_edge_lower_potential_lines[i][j]]))
+            cells.append(lower_cell)   
+    #### finally, create cells for the matched upper and lower lines, starting with the first matched upper line (the one associated with the aft stagnation streamline)
+    print("length of matched upper lines:", len(matched_upper_lines[0]))
+    for i in range(len(matched_upper_lines[0])-1):
+        upper_cell = np.array(([matched_upper_lines[0][i], trailing_edge_upper_potential_lines[0][i], trailing_edge_upper_potential_lines[0][i+1], matched_upper_lines[0][i+1]]))
+        cells.append(upper_cell)  # upper cell is the current point in the matched upper line, the current point in the trailing edge upper potential line, the next point in the trailing edge upper potential line, and the next point in the matched upper line
+    #### now do the last matched upper line (the one associated with the leading edge upper potential line)
+    for i in range(len(matched_upper_lines[-1])-1):
+        upper_cell = np.array(([leading_edge_upper_potential_lines[0][i], matched_upper_lines[-1][i], matched_upper_lines[-1][i+1], leading_edge_upper_potential_lines[0][i+1]]))
+        cells.append(upper_cell)  # upper cell is the current point in the leading edge upper potential line, the current point in the matched upper line, the next point in the matched upper line, and the next point in the leading edge upper potential line
+    #### now loop through the matched_upper_lines and create cells for each matched upper line (that doesn't border with the leading or trailing edge upper potential lines)
+    for i in range(len(matched_upper_lines)-1):
+        for j in range(len(matched_upper_lines[i])-1):
+            upper_cell = np.array(([matched_upper_lines[i+1][j], matched_upper_lines[i][j], matched_upper_lines[i][j+1], matched_upper_lines[i+1][j+1]]))
+            cells.append(upper_cell)
+    #### now loop through the lower stagnation potential lines and create cells that meet with the leading and trailing edge lower potential lines
+    for i in range(len(lower_stag_potential_forward)-1): ##### adjust to hit either side of the leading edge lower potential line
+        lower_stag_cell = np.array(([leading_edge_lower_potential_lines[0][i+1], lower_stag_potential_forward[i+1],  lower_stag_potential_forward[i], leading_edge_lower_potential_lines[0][i]]))
+        cells.append(lower_stag_cell)  # lower cell is the next point in the leading edge lower potential line, the next point in the lower stagnation potential line, the current point in the lower stagnation potential line, and the current point in the leading edge lower potential line
+    #### now loop through the lower stagnation potential line and connect it to the trailing edge lower potential line
+    for i in range(len(lower_stag_potential_aft)-1): ##### adjust to hit either side of the trailing edge lower potential line
+        lower_stag_cell = np.array(([lower_stag_potential_aft[i+1], trailing_edge_lower_potential_lines[0][i+1], trailing_edge_lower_potential_lines[0][i], lower_stag_potential_aft[i]]))
+        cells.append(lower_stag_cell)
+        # print("lower stagnation cell :", lower_stag_cell[:, 2])
+    #### finally loop through the matched lower lines and create cells for each matched lower line (that doesn't border with the leading or trailing edge lower potential lines)
+    for i in range(len(matched_lower_lines)-1):
+        for j in range(len(matched_lower_lines[i])-1):
+            lower_cell = np.array(([matched_lower_lines[i+1][j], matched_lower_lines[i][j], matched_lower_lines[i][j+1], matched_lower_lines[i+1][j+1]]))
+            cells.append(lower_cell)
+
+    
 
 
     
+
+    if mesh.is_visualize_mesh:
+        plt.scatter(mesh.upper_coords[:, 0], mesh.upper_coords[:, 1], color='blue', label='Upper Points', s=marker_size)
+        plt.scatter(mesh.lower_coords[:, 0], mesh.lower_coords[:, 1], color='red', label='Lower Points', s=marker_size)
+        plt.scatter(upper_midline[:, 0], upper_midline[:, 1], color='black', s=marker_size)  # blue color and circle marker
+        plt.scatter(lower_midline[:, 0], lower_midline[:, 1], color='black', s=marker_size)  # red color and circle marker
+        for i in range(len(matched_upper_lines)):
+            plt.scatter(matched_upper_lines[i][:, 0], matched_upper_lines[i][:, 1], color='black', s=marker_size)
+        for j in range(len(matched_lower_lines)):
+            plt.scatter(matched_lower_lines[j][:, 0], matched_lower_lines[j][:, 1], color='black', s=marker_size)
+        plt.scatter(lower_stag_potential_forward[:, 0], lower_stag_potential_forward[:, 1], color='black', s=marker_size)  # red color and circle marker
+        plt.scatter(lower_stag_potential_aft[:, 0], lower_stag_potential_aft[:, 1], color='black', s=marker_size)  # red color and circle marker
+        plt.scatter(forward_stag_streamline[:, 0], forward_stag_streamline[:, 1], color='black', s=marker_size)  # blue color and circle marker
+        plt.scatter(aft_stag_streamline[:, 0], aft_stag_streamline[:, 1], color='black', s=marker_size)  # blue color and circle marker
+        for i in range(len(leading_edge_upper_potential_lines)):
+            plt.scatter(leading_edge_upper_potential_lines[i][:, 0], leading_edge_upper_potential_lines[i][:, 1], color='black', s=marker_size)
+        for i in range(len(trailing_edge_upper_potential_lines)):
+            plt.scatter(trailing_edge_upper_potential_lines[i][:, 0], trailing_edge_upper_potential_lines[i][:, 1], color='black', s=marker_size)
+        for i in range(len(leading_edge_lower_potential_lines)):
+            plt.scatter(leading_edge_lower_potential_lines[i][:, 0], leading_edge_lower_potential_lines[i][:, 1], color='black', s=marker_size)
+        for i in range(len(trailing_edge_lower_potential_lines)):
+            plt.scatter(trailing_edge_lower_potential_lines[i][:, 0], trailing_edge_lower_potential_lines[i][:, 1], color='black', s=marker_size)
+        for i in range(len(cells)):
+            mesh.plot_cell(cells[i], linewidth=0.5)  # plot the cells on the upper surface
+        if mesh.is_visualize_node_integers:
+            for i in range(len(mesh.upper_coords)):
+                plt.text(mesh.upper_coords[i, 0] + 0.05, mesh.upper_coords[i, 1] - 0.05, str(int(mesh.upper_coords[i, 2])), fontsize=8, color='black')
+            for j in range(len(mesh.lower_coords)):
+                plt.text(mesh.lower_coords[j, 0] + 0.05, mesh.lower_coords[j, 1] - 0.05, str(int(mesh.lower_coords[j, 2])), fontsize=8, color='black')
+            for i in range(len(forward_stag_streamline)):
+                plt.text(forward_stag_streamline[i, 0] + 0.05, forward_stag_streamline[i, 1] - 0.05, str(int(forward_stag_streamline[i, 2])), fontsize=8, color='black')
+            for j in range(len(aft_stag_streamline)):
+                plt.text(aft_stag_streamline[j, 0] + 0.05, aft_stag_streamline[j, 1] - 0.05, str(int(aft_stag_streamline[j, 2])), fontsize=8, color='black')
+            for line in matched_upper_lines:
+                    for k in range(line.shape[0]):
+                        plt.text(line[k, 0] + 0.05, line[k, 1] - 0.05, str(int(line[k, 2])), fontsize=8, color='black')
+            for line in matched_lower_lines:
+                for k in range(line.shape[0]):
+                    plt.text(line[k, 0] + 0.05, line[k, 1] - 0.05, str(int(line[k, 2])), fontsize=8, color='black')
+            # lower stagnation potential lines
+            for i in range(len(lower_stag_potential_forward)):
+                plt.text(lower_stag_potential_forward[i, 0] + 0.05, lower_stag_potential_forward[i, 1] - 0.05, str(int(lower_stag_potential_forward[i, 2])), fontsize=8, color='black')
+            for j in range(len(lower_stag_potential_aft)):
+                plt.text(lower_stag_potential_aft[j, 0] + 0.05, lower_stag_potential_aft[j, 1] - 0.05, str(int(lower_stag_potential_aft[j, 2])), fontsize=8, color='black')
+            # leading_edge_upper_potential_lines
+            for i in range(len(leading_edge_upper_potential_lines)):
+                for k in range(leading_edge_upper_potential_lines[i].shape[0]):
+                    plt.text(leading_edge_upper_potential_lines[i][k, 0] + 0.05, leading_edge_upper_potential_lines[i][k, 1] - 0.05, str(int(leading_edge_upper_potential_lines[i][k, 2])), fontsize=8, color='black')
+            # trailing_edge_upper_potential_lines
+            for i in range(len(trailing_edge_upper_potential_lines)):
+                for k in range(trailing_edge_upper_potential_lines[i].shape[0]):
+                    plt.text(trailing_edge_upper_potential_lines[i][k, 0] + 0.05, trailing_edge_upper_potential_lines[i][k, 1] - 0.05, str(int(trailing_edge_upper_potential_lines[i][k, 2])), fontsize=8, color='black')
+            # leading_edge_lower_potential_lines
+            for i in range(len(leading_edge_lower_potential_lines)):
+                for k in range(leading_edge_lower_potential_lines[i].shape[0]):
+                    plt.text(leading_edge_lower_potential_lines[i][k, 0] + 0.05, leading_edge_lower_potential_lines[i][k, 1] - 0.05, str(int(leading_edge_lower_potential_lines[i][k, 2])), fontsize=8, color='black')
+            # trailing_edge_lower_potential_lines
+            for i in range(len(trailing_edge_lower_potential_lines)):
+                for k in range(trailing_edge_lower_potential_lines[i].shape[0]):
+                    plt.text(trailing_edge_lower_potential_lines[i][k, 0] + 0.05, trailing_edge_lower_potential_lines[i][k, 1] - 0.05, str(int(trailing_edge_lower_potential_lines[i][k, 2])), fontsize=8, color='black')
+
+
+        plt.show()
+
+        
+
+    # n_upper   = len(mesh.upper_coords)          # len(upper) + 1 cells on upper side
+    # n_lower   = len(mesh.lower_coords)          # len(lower) + 3 cells on lower side
+    # n_cells   = n_upper + n_lower + 4           # total cells (derived from your loops)
+    # n_coords  = mesh.upper_coords.shape[1]      # 2 or 3 depending on your mesh
+
+    # cells = np.empty((n_cells, 4, n_coords), dtype=mesh.upper_coords.dtype)
+
+    # k = 0  # running index -------------------------------------------------
+    # cells[k] = np.array([mesh.upper_coords[0],
+    #                         aft_stag_streamline[0],
+    #                         trailing_edge_upper_potential_lines[0][0],
+    #                         matched_upper_lines[0][0]])
+    # k += 1
+
+    # for i in range(1, len(mesh.upper_coords)):
+    #     cells[k] = np.array([mesh.upper_coords[i],
+    #                             mesh.upper_coords[i-1],
+    #                             matched_upper_lines[i-1][0],
+    #                             matched_upper_lines[i][0]])
+    #     k += 1
+
+    # cells[k] = np.array([forward_stag_streamline[0],
+    #                         mesh.upper_coords[-1],
+    #                         matched_upper_lines[-1][0],
+    #                         leading_edge_upper_potential_lines[0][0]])
+    # k += 1
+
+    # cells[k] = np.array([leading_edge_lower_potential_lines[0][0],
+    #                         lower_stag_potential_forward[0],
+    #                         mesh.upper_coords[-1],
+    #                         forward_stag_streamline[0]])
+    # k += 1
+
+    # cells[k] = np.array([lower_stag_potential_forward[0],
+    #                         matched_lower_lines[0][0],
+    #                         mesh.lower_coords[0],
+    #                         mesh.upper_coords[-1]])
+    # k += 1
+
+    # for i in range(1, len(mesh.lower_coords)):
+    #     cells[k] = np.array([matched_lower_lines[i-1][0],
+    #                             matched_lower_lines[i][0],
+    #                             mesh.lower_coords[i],
+    #                             mesh.lower_coords[i-1]])
+    #     k += 1
+
+    # cells[k] = np.array([matched_lower_lines[-1][0],
+    #                         lower_stag_potential_aft[0],
+    #                         mesh.upper_coords[0],
+    #                         mesh.lower_coords[-1]])
+    # k += 1
+
+    # cells[k] = np.array([lower_stag_potential_aft[0],
+    #                         trailing_edge_lower_potential_lines[0][0],
+    #                         aft_stag_streamline[0],
+    #                         mesh.upper_coords[0]])
+    # # k += 1  # (optional)
+
+    # # --------------------------------------------------------------------
+    # for i in range(len(cells)):
+    #     mesh.plot_cell(cells[i], linewidth=0.5)
