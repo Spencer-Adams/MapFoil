@@ -64,8 +64,9 @@ class mesh_generation_object(cylinder, vort_panel):
                 appellian_root, xi_eta_vals, appelian_value = self.run_appellian_roots(r_values, theta_values, self.D)
                 print("appellian circulation: ", appellian_root)
                 self.circulation = appellian_root
-
-
+            #### the mesh filename includes the zeta_center, D value, angle of attack, radial nodes, radial distance, surface nodes, and radial growth 
+            self.mesh_filename = f"mesh_zeta0_{self.zeta_center.real:.3f}_{self.zeta_center.imag:.3f}_D_{self.D:.3f}_AoA_{np.rad2deg(self.angle_of_attack):.1f}deg_radial_nodes_{self.radial_nodes}_surface_nodes_{self.surface_nodes}_radial_distance_{self.radial_distance}_radial_growth_{self.radial_growth}.su2"
+            print("Mesh filename:", self.mesh_filename)
             plt.xlim(-self.radial_distance-1, self.radial_distance+1)
             plt.ylim(-self.radial_distance-1, self.radial_distance+1)
             plt.xlabel(r"$x/c$")
@@ -101,19 +102,20 @@ class mesh_generation_object(cylinder, vort_panel):
         point = np.array(start_point)
         streamline_points = [point]
         i = 0
-        max_iter = 10000
+        max_iter = 100000
         total_distance = self.radial_distance
         while True:
             # Take RK4 step
             point_new = hlp.rk4(point, direction, self.plot_delta_s, self.surface_normal, func)
             # Stop if new point is outside x bounds
-            if point_new[0] < self.plot_x_lower_lim or point_new[0] > self.plot_x_upper_lim:
-                break
+            # if point_new[0] < self.plot_x_lower_lim or point_new[0] > self.plot_x_upper_lim:
+            #     break
             streamline_points.append(point_new)
             # Compute total arc length covered so far
-            arc_length_covered = hlp.compute_arc_length(streamline_points)
+            arc_length_covered = hlp.compute_arc_length(streamline_points) #np.linalg.norm(streamline_points)#/self.chord_length #
             # Check termination condition
             if arc_length_covered >= total_distance or i > max_iter:
+                # print("ARC LENGTH COVERED:", arc_length_covered, "TOTAL DISTANCE:", total_distance)
                 break
             point = point_new
             i += 1
@@ -145,7 +147,7 @@ class mesh_generation_object(cylinder, vort_panel):
         if psi_targets is not None:
             # Step outward to match given stream function values
             for target_psi in psi_targets:
-                ds = self.find_correct_ds_for_psi(100.0, point, direction, target_psi, func=func)
+                ds = self.find_correct_ds_for_psi(0.1, point, direction, target_psi, func=func)
                 point_new = hlp.rk4(point, direction, ds, self.surface_normal, func)
                 points.append(point_new)
                 point = point_new
@@ -166,13 +168,17 @@ class mesh_generation_object(cylinder, vort_panel):
         return np.array(points)
 
     
-    def bisection_function(self, ds, point, direction, delta_position, func=None):
+    def function_for_bisection_or_newton_method(self, ds, point, direction, delta_position, func=None):
         if func is None:
             func = self.unit_velocity
         new_point = hlp.rk4(point, direction, ds, self.surface_normal, func)
         return np.linalg.norm(new_point - point) - delta_position
 
-    def find_correct_ds_for_psi(self, starting_ds, point, direction, target_psi, func=None, tolerance=1e-4, max_iter=100):
+    def psi_error(self, point, direction, ds, surface_normal, func, target_psi):
+        new_point = hlp.rk4(point, direction, ds, surface_normal, func)
+        return self.stream_function(new_point) - target_psi
+
+    def find_correct_ds_for_psi(self, starting_ds, point, direction, target_psi, func=None, tolerance=1e-4, max_iter=10000):
         """
         Find ds such that ψ(point + ds) = target_psi using bisection.
         Works for both positive and negative ψ targets.
@@ -185,18 +191,14 @@ class mesh_generation_object(cylinder, vort_panel):
 
         psi_start = self.stream_function(point)
 
-        def psi_error(ds):
-            new_point = hlp.rk4(point, direction, ds, self.surface_normal, func)
-            return self.stream_function(new_point) - target_psi
-
-        err_low = psi_error(ds_low)
-        err_high = psi_error(ds_high)
+        err_low = self.psi_error(point, direction, ds_low, self.surface_normal, func, target_psi)
+        err_high = self.psi_error(point, direction, ds_high, self.surface_normal, func, target_psi)
 
         # Expand ds_high until it brackets the target
         attempts = 0
-        while err_low * err_high > 0 and attempts < 50:
+        while err_low * err_high > 0 and attempts < 100:
             ds_high *= 2
-            err_high = psi_error(ds_high)
+            err_high = self.psi_error(point, direction, ds_high, self.surface_normal, func, target_psi)
             attempts += 1
 
         if err_low * err_high > 0:
@@ -205,7 +207,7 @@ class mesh_generation_object(cylinder, vort_panel):
 
         for _ in range(max_iter):
             ds_mid = 0.5 * (ds_low + ds_high)
-            err_mid = psi_error(ds_mid)
+            err_mid = self.psi_error(point, direction, ds_mid, self.surface_normal, func, target_psi)
             if abs(err_mid) < tolerance:
                 return ds_mid
             elif err_low * err_mid < 0:
@@ -226,14 +228,14 @@ class mesh_generation_object(cylinder, vort_panel):
         ds_low = 0.0
         ds_high = starting_ds
         # Expand upper bound until we bracket the root
-        while self.bisection_function(ds_high, point, direction, delta_position, func = func) < 0:
+        while self.function_for_bisection_or_newton_method(ds_high, point, direction, delta_position, func = func) < 0:
             ds_high *= 2
             if ds_high > 1e6:
                 print("Failed to bracket root; returning small ds.")
                 return 0.1
         for _ in range(max_iter):
             ds_mid = 0.5 * (ds_low + ds_high)
-            f_mid = self.bisection_function(ds_mid, point, direction, delta_position, func = func)
+            f_mid = self.function_for_bisection_or_newton_method(ds_mid, point, direction, delta_position, func = func)
             if abs(f_mid) < tolerance:
                 return ds_mid
             elif f_mid < 0:
@@ -241,19 +243,19 @@ class mesh_generation_object(cylinder, vort_panel):
             else:
                 ds_high = ds_mid
         print("Warning: Maximum iterations reached in find_correct_ds.")
-        print("Final error:", abs(self.bisection_function(ds_mid, point, direction, delta_position)), "Tolerance:", tolerance)
+        print("Final error:", abs(self.function_for_bisection_or_newton_method(ds_mid, point, direction, delta_position)), "Tolerance:", tolerance)
         input("Press Enter to continue...")
         return ds_mid
     
     def create_body_mesh(self):
         self.upper_coords, self.lower_coords = self.given_geom_and_stag_thetas_calc_top_and_bottom_coords(self.theta_aft, self.theta_forward, self.zeta_geom_array)
-        print("length of upper_coords: ", len(self.upper_coords), " length of lower_coords: ", len(self.lower_coords))
         upper_indices = np.arange(len(self.upper_coords)).reshape(-1, 1)  # 0, 1, ..., N_upper-1
         lower_indices = (np.arange(len(self.lower_coords)) + len(self.upper_coords)).reshape(-1, 1)  # N_upper, N_upper+1, ...
         self.upper_coords = np.hstack((self.upper_coords, upper_indices))  # shape (N, 3)
         self.lower_coords = np.hstack((self.lower_coords, lower_indices))  # shape (N, 3)
-        self.leftmost_point = self.upper_coords[0]  # leftmost point of the entire surface (upper and lower)
-        self.rightmost_point = self.lower_coords[-1]  # rightmost point of the entire surface (upper and lower)
+        self.leftmost_point = self.upper_coords[-1]  # leftmost point of the entire surface (upper and lower)
+        self.rightmost_point = self.upper_coords[0]  # rightmost point of the entire surface (upper and lower)
+        self.chord_length = self.rightmost_point[0] - self.leftmost_point[0]  # calculate the chord length :2 # means we only take the first two coordinates (x and y)
         # Map zeta to z, updating only x and y, preserving node index
         for i in range(len(self.upper_coords)):
             zeta_upper = self.upper_coords[i, 0] + 1j * self.upper_coords[i, 1]
@@ -303,18 +305,7 @@ class mesh_generation_object(cylinder, vort_panel):
         self.inner_boundary_mesh = np.concatenate((self.upper_coords, self.lower_coords), axis=0)
         self.last_body_index = self.lower_coords[-1, 2]  # this is the last index of the lower surface
     
-    def calc_unshifted_limits(self):
-        """"""
-        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim, mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = -mesh.radial_distance+1, mesh.radial_distance+1, -mesh.radial_distance, mesh.radial_distance
-        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim = mesh.plot_x_lower_lim + mesh.zeta_center.real + mesh.leading_edge, mesh.plot_x_upper_lim + mesh.zeta_center.real + mesh.leading_edge
-        mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = mesh.plot_y_lower_lim + mesh.zeta_center.imag, mesh.plot_y_upper_lim + mesh.zeta_center.imag
-        # # now divide the x and y limits by the trailing edge
-        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim, mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = mesh.plot_x_lower_lim * mesh.trailing_edge, mesh.plot_x_upper_lim * mesh.trailing_edge, mesh.plot_y_lower_lim * mesh.trailing_edge, mesh.plot_y_upper_lim * mesh.trailing_edge
-        mesh.plot_x_start = mesh.plot_x_lower_lim
-        # re-define radial_distance to be plot_y_upper_lim 
-        mesh.radial_distance = mesh.plot_y_upper_lim
-        plt.xlim(-self.radial_distance-10, self.radial_distance+10)
-        plt.ylim(-self.radial_distance-10, self.radial_distance+10)
+
     
     def plot_mesh(self):
         """"""
@@ -383,369 +374,522 @@ class mesh_generation_object(cylinder, vort_panel):
             linewidth (float): Width of the cell edges.
         """
         # connect the first point to the second point
-        plt.plot([four_element_array[0, 0], four_element_array[1, 0]], [four_element_array[0, 1], four_element_array[1, 1]], color="blue", linewidth=linewidth)  # plot the first line as blue
+        plt.plot([four_element_array[0, 0], four_element_array[1, 0]], [four_element_array[0, 1], four_element_array[1, 1]], color="black", linewidth=linewidth)  # plot the first line as blue
         # connect the second point to the third point
-        plt.plot([four_element_array[1, 0], four_element_array[2, 0]], [four_element_array[1, 1], four_element_array[2, 1]], color="green", linewidth=linewidth)  # plot the second line as green
+        plt.plot([four_element_array[1, 0], four_element_array[2, 0]], [four_element_array[1, 1], four_element_array[2, 1]], color="black", linewidth=linewidth)  # plot the second line as green
         # connect the third point to the fourth point
-        plt.plot([four_element_array[2, 0], four_element_array[3, 0]], [four_element_array[2, 1], four_element_array[3, 1]], color="red", linewidth=linewidth)  # plot the third line as red
+        plt.plot([four_element_array[2, 0], four_element_array[3, 0]], [four_element_array[2, 1], four_element_array[3, 1]], color="black", linewidth=linewidth)  # plot the third line as red
         # now connect the fourth point to the first point
-        plt.plot([four_element_array[0, 0], four_element_array[-1, 0]], [four_element_array[0, 1], four_element_array[-1, 1]], color="orange", linewidth=linewidth)
+        plt.plot([four_element_array[0, 0], four_element_array[-1, 0]], [four_element_array[0, 1], four_element_array[-1, 1]], color="black", linewidth=linewidth)
+
+
+
+    def calc_shifted_limits(self):
+        """Shifts the mesh such that the surface points form a unit chord from 0 to 1. This function is the inverse of the calc_unshifted_limits function."""
+        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim, mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = -mesh.radial_distance+1, mesh.radial_distance+1, -mesh.radial_distance, mesh.radial_distance
+        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim = mesh.plot_x_lower_lim - mesh.zeta_center.real - mesh.leading_edge, mesh.plot_x_upper_lim - mesh.zeta_center.real - mesh.leading_edge
+        mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = mesh.plot_y_lower_lim - mesh.zeta_center.imag, mesh.plot_y_upper_lim - mesh.zeta_center.imag
+        # now divide the x and y limits by the trailing edge
+        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim, mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = mesh.plot_x_lower_lim / mesh.trailing_edge, mesh.plot_x_upper_lim / mesh.trailing_edge, mesh.plot_y_lower_lim / mesh.trailing_edge, mesh.plot_y_upper_lim / mesh.trailing_edge
+        mesh.plot_x_start = mesh.plot_x_lower_lim
+        # re-define radial_distance to be plot_y_upper_lim
+        mesh.radial_distance = mesh.plot_y_upper_lim
+        plt.xlim(-self.radial_distance*1.5, self.radial_distance*1.5)
+        plt.ylim(-self.radial_distance*1.5, self.radial_distance*1.5)
+
+    def calc_unshifted_limits(self):
+        """"""
+        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim, mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = -mesh.radial_distance+1, mesh.radial_distance+1, -mesh.radial_distance, mesh.radial_distance
+        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim = mesh.plot_x_lower_lim + mesh.zeta_center.real + mesh.leading_edge, mesh.plot_x_upper_lim + mesh.zeta_center.real + mesh.leading_edge
+        mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = mesh.plot_y_lower_lim + mesh.zeta_center.imag, mesh.plot_y_upper_lim + mesh.zeta_center.imag
+        # # now divide the x and y limits by the trailing edge
+        mesh.plot_x_lower_lim, mesh.plot_x_upper_lim, mesh.plot_y_lower_lim, mesh.plot_y_upper_lim = mesh.plot_x_lower_lim * mesh.trailing_edge, mesh.plot_x_upper_lim * mesh.trailing_edge, mesh.plot_y_lower_lim * mesh.trailing_edge, mesh.plot_y_upper_lim * mesh.trailing_edge
+        mesh.plot_x_start = mesh.plot_x_lower_lim
+        # re-define radial_distance to be plot_y_upper_lim 
+        mesh.radial_distance = mesh.plot_y_upper_lim
+        plt.xlim(-self.radial_distance*1.5, self.radial_distance*1.5)
+        plt.ylim(-self.radial_distance*1.5, self.radial_distance*1.5)
+
+
+    def convert_grid_into_SU2_format(self, xy_points: np.array, cells: np.array, inner_boundary_lines: np.array, outer_boundary_lines: np.array, mesh_filename: str = "complex_streamline_SU2_mesh_gen.su2"):
+        """
+        Converts grid data into SU2 mesh file format and writes it to a file.
+
+        Parameters
+        ----------
+        xy_points : np.array
+            Array of node coordinates with shape (N, 3), where each row contains the (x, y) coordinates of a point and the index of that coordinate pair.
+        cells : np.array
+            Array of quadrilateral cell connectivity with shape (M, 4), where each row contains the indices of the four corner points of a cell.
+        inner_boundary_lines : np.array
+            Array of inner boundary line segments with shape (K, 2), where each row contains the indices of the two endpoints of a line segment.
+        outer_boundary_lines : np.array
+            Array of outer boundary line segments with shape (L, 2), where each row contains the indices of the two endpoints of a line segment.
+        mesh_filename : str, optional
+            Name of the output SU2 mesh file. Default is "complex_streamline_SU2_mesh_gen.su2".
+
+        Notes
+        -----
+        - The function assumes quadrilateral elements (shape type 9) for cells and line elements (shape type 3) for boundaries.
+        - The mesh file is written in SU2 format, including node coordinates, element connectivity, and boundary markers for inner and outer boundaries.
+        """
+        num_dim = 2
+        npoin = len(xy_points)
+        nelem = len(cells)
+        nmark = 2 #### change if we end up modeling multiple airfoils 
+        #### create npoin array from the xy_points (each row contains 3 columns: x, y, index- these come directly from the xy_points array)
+        npoin_array = xy_points 
+        #### create a nelem array (each row contains 5 columns: 9, index1, index2, index3, index4) the 9 indicates the shape type which is a quadrilateral, the indices come directly from cells array
+        nelem_array = np.zeros((nelem, 5), dtype=int)
+        nelem_array[:, 0] = 9  # shape type for quadrilateral
+        nelem_array[:, 1] = cells[:, 0].astype(int)  # first index
+        nelem_array[:, 2] = cells[:, 1].astype(int)  # second index
+        nelem_array[:, 3] = cells[:, 2].astype(int)  # third index
+        nelem_array[:, 4] = cells[:, 3].astype(int)  # fourth index
+        #### create a nmark array for the inner and outer boundary lines
+        inner_marker_tag = "inner_boundary"
+        outer_marker_tag = "outer_boundary"
+        inner_marker_elems = len(inner_boundary_lines)
+        outer_marker_elems = len(outer_boundary_lines) 
+        #### create a nmark_inner_array (each row contains 3 columns: 3, index1, index2) the 3 indicates the shape type which is a line, the indices come directly from inner_boundary_lines array
+        nmark_inner_array = np.zeros((inner_marker_elems, 3), dtype=int)
+        nmark_inner_array[:, 0] = 3  # shape type for line
+        nmark_inner_array[:, 1] = inner_boundary_lines[:, 0].astype(int)  # first index
+        nmark_inner_array[:, 2] = inner_boundary_lines[:, 1].astype(int)  # second index
+        #### do the same for the outer boundary lines
+        nmark_outer_array = np.zeros((outer_marker_elems, 3), dtype=int)
+        nmark_outer_array[:, 0] = 3  # shape type for line
+        nmark_outer_array[:, 1] = outer_boundary_lines[:, 0].astype(int)  # first index
+        nmark_outer_array[:, 2] = outer_boundary_lines[:, 1].astype(int)  # second index
+        #### write the mesh file in SU2 format
+        with open(mesh_filename, "w", encoding="utf‑8") as f:
+            #### Header: dimension of the problem
+            f.write(f"NDIME= {num_dim}\n")
+            #### Interior elements (quadrilaterals, VTK id = 9)
+            f.write(f"NELEM= {nelem}\n")
+            # include an explicit element index (optional in SU2, but matches
+            # your reference file) ─ last integer on every line
+            for idx, (etype, n1, n2, n3, n4) in enumerate(nelem_array):
+                f.write(f"{etype}\t{n1}\t{n2}\t{n3}\t{n4}\t{idx}\n")
+            #### Node coordinates
+            f.write(f"NPOIN= {npoin}\n")
+            # xy_points already stores (x, y, index)
+            for x, y, idx in npoin_array:
+                f.write(f"{x:.14f}\t{y:.14f}\t{int(idx)}\n")
+            #### Boundary markers
+            f.write(f"NMARK= {nmark}\n")
+            #### inner boundary 
+            f.write(f"MARKER_TAG= {inner_marker_tag}\n")
+            f.write(f"MARKER_ELEMS= {inner_marker_elems}\n")
+            for etype, n1, n2 in nmark_inner_array:
+                f.write(f"{etype}\t{n1}\t{n2}\n")
+            #### outer boundary 
+            f.write(f"MARKER_TAG= {outer_marker_tag}\n")
+            f.write(f"MARKER_ELEMS= {outer_marker_elems}\n")
+            for etype, n1, n2 in nmark_outer_array:
+                f.write(f"{etype}\t{n1}\t{n2}\n")
+            
+
 
 if __name__ == "__main__":
 
     # initialize the cylinder object
-    plt.rcParams["font.family"] = "Serif"
-    plt.rcParams["font.size"] = 17.0
-    plt.rcParams["axes.labelsize"] = 17.0
-    plt.rcParams['lines.linewidth'] = 1.0 # 1.0
-    plt.rcParams["xtick.minor.visible"] = True 
-    plt.rcParams["ytick.minor.visible"] = True
-    plt.rcParams["xtick.direction"] = plt.rcParams["ytick.direction"] = "in"
-    plt.rcParams["xtick.bottom"] = plt.rcParams["xtick.top"] = True
-    plt.rcParams["ytick.left"] = plt.rcParams["ytick.right"] = True
-    plt.rcParams["xtick.major.width"] = plt.rcParams["ytick.major.width"] = 0.75
-    plt.rcParams["xtick.minor.width"] = plt.rcParams["ytick.minor.width"] = 0.75
-    plt.rcParams["xtick.major.size"] = plt.rcParams["ytick.major.size"] = 5.0
-    plt.rcParams["xtick.minor.size"] = plt.rcParams["ytick.minor.size"] = 2.5
-    plt.rcParams["mathtext.fontset"] = "dejavuserif"
-    plt.rcParams['figure.dpi'] = 300.0
-    ## change legend parameters
-    plt.rcParams["legend.fontsize"] = 17.0
-    plt.rcParams["legend.frameon"] = True
-    subdict = {
-        "figsize" : (3.25,3.5),
-        "constrained_layout" : True,
-        "sharex" : True
-    }
+    # plt.rcParams["font.family"] = "Serif"
+    # plt.rcParams["font.size"] = 17.0
+    # plt.rcParams["axes.labelsize"] = 17.0
+    # plt.rcParams['lines.linewidth'] = 1.0 # 1.0
+    # plt.rcParams["xtick.minor.visible"] = True 
+    # plt.rcParams["ytick.minor.visible"] = True
+    # plt.rcParams["xtick.direction"] = plt.rcParams["ytick.direction"] = "in"
+    # plt.rcParams["xtick.bottom"] = plt.rcParams["xtick.top"] = True
+    # plt.rcParams["ytick.left"] = plt.rcParams["ytick.right"] = True
+    # plt.rcParams["xtick.major.width"] = plt.rcParams["ytick.major.width"] = 0.75
+    # plt.rcParams["xtick.minor.width"] = plt.rcParams["ytick.minor.width"] = 0.75
+    # plt.rcParams["xtick.major.size"] = plt.rcParams["ytick.major.size"] = 5.0
+    # plt.rcParams["xtick.minor.size"] = plt.rcParams["ytick.minor.size"] = 2.5
+    # plt.rcParams["mathtext.fontset"] = "dejavuserif"
+    # plt.rcParams['figure.dpi'] = 300.0
+    # ## change legend parameters
+    # plt.rcParams["legend.fontsize"] = 17.0
+    # plt.rcParams["legend.frameon"] = True
+    # subdict = {
+    #     "figsize" : (3.25,3.5),
+    #     "constrained_layout" : True,
+    #     "sharex" : True
+    # }
     mesh = mesh_generation_object()
-    mesh.theta_aft = mesh.calculate_aft_stagnation_theta_in_Chi_from_Gamma(mesh.circulation)
-    mesh.theta_forward = mesh.calculate_forward_stag_theta_in_Chi_from_aft_stag_theta(mesh.theta_aft)
-    mesh.forward_stag, mesh.aft_stag = mesh.calculate_forward_and_aft_stag_locations_in_z(mesh.theta_aft)
-    mesh.get_full_geometry_zeta(mesh.surface_nodes, mesh.theta_aft, mesh.theta_forward, 2*np.pi + mesh.theta_aft)
-    mesh.get_full_geometry()
-    mesh.shift_joukowski_cylinder()
-    mesh.calc_unshifted_limits()
-    midline_start_points = mesh.create_body_mesh()
-    
-    marker_size = 0.1
-    last_body_index = mesh.last_body_index
-    #### streamlines geometrically spaced from the stagnation points
-    forward_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1)[1:]
-    forward_stag_streamline = mesh.make_N_by_2_an_N_by_three(forward_stag_streamline, last_body_index)  # add index column starting from last_body_index + 1
-    last_index_forward_stag = forward_stag_streamline[-1, 2]  # last index of the forward stagnation streamline
-    aft_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, 1)[1:]
-    aft_stag_streamline = mesh.make_N_by_2_an_N_by_three(aft_stag_streamline, last_index_forward_stag)  # add index column starting from last_index_forward_stag + 1
-    last_index_aft_stag = aft_stag_streamline[-1, 2]  # last index of the aft stagnation streamline
-    #### upper midline ####
-    upper_midline = mesh.calc_wrapped_stream_or_potential_line(mesh.closest_upper_point[:2],direction=1,psi_targets=None,func=mesh.unit_normal_velocity)[1:]  # drop the first point (which is the surface point)
-    upper_stream_function_values = np.array([mesh.stream_function(p) for p in upper_midline])
-    matched_upper_lines = []
-    last_index_upper_midline = last_index_aft_stag 
-    for i in tqdm(range(len(mesh.upper_coords)), desc="Calculating Upper Surface Potential Lines", unit="line"):
-        if not np.allclose(mesh.upper_coords[i, :2], mesh.closest_upper_point[:2]): # check if the point is not the closest upper point, the :2 means we only take the first two coordinates (x and y)
-            start_point = mesh.upper_coords[i, :2]
-            matched_line = mesh.calc_wrapped_stream_or_potential_line(start_point,direction=1,psi_targets=upper_stream_function_values,func=mesh.unit_normal_velocity)[1:]  # skip surface point again
-            matched_line = mesh.make_N_by_2_an_N_by_three(matched_line, last_index_upper_midline)  # add index column starting from last_index + 1
-            last_index_upper_midline = matched_line[-1, 2]  # update the last index of the upper midline
-            matched_upper_lines.append(matched_line)
-        else:
-            upper_midline = mesh.make_N_by_2_an_N_by_three(upper_midline, last_index_upper_midline)  # add index column starting from last_index_aft_stag + 1
-            matched_upper_lines.append(upper_midline)
-            last_index_upper_midline = upper_midline[-1, 2]  # update the last index of the upper midline
-    last_upper_midline_index = last_index_upper_midline 
-    #### lower midline ####
-    lower_midline = mesh.calc_wrapped_stream_or_potential_line(mesh.closest_lower_point[:2],direction=-1,psi_targets=None,func=mesh.unit_normal_velocity)[1:]  # drop the first point (which is the surface point)
-    lower_stream_function_values = np.array([mesh.stream_function(p) for p in lower_midline])
-    matched_lower_lines = []
-    last_index_lower_midline = last_upper_midline_index  # start from the last index of the upper midline
-    for j in tqdm(range(len(mesh.lower_coords)), desc="Calculating Lower Surface Potential Lines", unit="line"):
-        if not np.allclose(mesh.lower_coords[j, :2], mesh.closest_lower_point[:2]):
-            start_point = mesh.lower_coords[j, :2]
-            matched_line = mesh.calc_wrapped_stream_or_potential_line(start_point,direction=-1,psi_targets=lower_stream_function_values,func=mesh.unit_normal_velocity)[1:]
-            matched_line = mesh.make_N_by_2_an_N_by_three(matched_line, last_index_lower_midline)  # add index column starting from last_index_lower_midline + 1
-            last_index_lower_midline = matched_line[-1, 2]  # update the last index of the lower midline
-            matched_lower_lines.append(matched_line)
-        else:
-            lower_midline = mesh.make_N_by_2_an_N_by_three(lower_midline, last_index_lower_midline)  # add index column starting from last_index_lower_midline + 1
-            matched_lower_lines.append(lower_midline)
-            last_index_lower_midline = lower_midline[-1, 2]
-    last_lower_midline_index = last_index_lower_midline  # this is the last index of the lower midline
-    #### calculate normal lines extending downward from the stagnation points ####
-    lower_stag_potential_forward = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1, psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface point
-    lower_stag_potential_forward = mesh.make_N_by_2_an_N_by_three(lower_stag_potential_forward, last_lower_midline_index) 
-    last_index_lower_potential_forward = lower_stag_potential_forward[-1, 2]  # last index of the lower stagnation potential line
-    lower_stag_potential_aft = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, -1, psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface point
-    lower_stag_potential_aft = mesh.make_N_by_2_an_N_by_three(lower_stag_potential_aft, last_index_lower_potential_forward)  # add index column starting from last_index_lower_potential_forward + 1
-    last_index_lower_potential_aft = lower_stag_potential_aft[-1, 2]  # last index of the lower stagnation potential line
-    #### forward stagnation potential lines extending from the forward stagnation streamline ####
-    leading_edge_upper_potential_lines = []
-    index_leading_edge_upper = last_index_lower_potential_aft
-    for i in tqdm(range(len(forward_stag_streamline)), desc="Calculating Leading Edge Upper Potential Lines", unit="streamline"):
-        x_start, y_start = forward_stag_streamline[i, 0], forward_stag_streamline[i, 1]
-        start_point = np.array([x_start, y_start])
-        potential_line_leading_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface normal point
-        potential_line_leading_edge_upper = mesh.make_N_by_2_an_N_by_three(potential_line_leading_edge_upper, index_leading_edge_upper)  # add index column starting from first_index_leading_edge_upper + 1
-        index_leading_edge_upper = potential_line_leading_edge_upper[-1, 2]  # update the last index of the leading edge upper potential line
-        leading_edge_upper_potential_lines.append(potential_line_leading_edge_upper)
-    last_index_leading_edge_upper = index_leading_edge_upper  # this is the last index of the leading edge upper potential lines
-    #### upper normal lines extending from the aft stagnation streamline ####
-    trailing_edge_upper_potential_lines = []
-    index_trailing_edge_upper = last_index_leading_edge_upper
-    for i in tqdm(range(len(aft_stag_streamline)), desc="Calculating Trailing Edge Upper Potential Lines", unit="streamline"):
-        x_start, y_start = aft_stag_streamline[i, 0], aft_stag_streamline[i, 1]
-        start_point = np.array([x_start, y_start])
-        potential_line_trailing_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
-        potential_line_trailing_edge_upper = mesh.make_N_by_2_an_N_by_three(potential_line_trailing_edge_upper, index_trailing_edge_upper)  # add index column starting from first_index_trailing_edge_upper + 1
-        index_trailing_edge_upper = potential_line_trailing_edge_upper[-1, 2]  # last index of the trailing edge upper potential line
-        trailing_edge_upper_potential_lines.append(potential_line_trailing_edge_upper)
-    last_index_trailing_edge_upper = index_trailing_edge_upper  # this is the last index of the trailing edge upper potential lines
-    #### lower normal lines extending from the stagnation streamlines starting with the forward stagnation streamline ####
-    leading_edge_lower_potential_lines = []
-    index_leading_edge_lower = last_index_trailing_edge_upper
-    for i in tqdm(range(len(forward_stag_streamline)), desc="Calculating Leading Edge Lower Potential Lines", unit="streamline"):
-        x_start, y_start = forward_stag_streamline[i, 0], forward_stag_streamline[i, 1]
-        start_point = np.array([x_start, y_start])
-        potential_line_leading_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
-        potential_line_leading_edge_lower = mesh.make_N_by_2_an_N_by_three(potential_line_leading_edge_lower, index_leading_edge_lower)  # add index column starting from first_index_leading_edge_lower + 1
-        index_leading_edge_lower = potential_line_leading_edge_lower[-1, 2]  # update the last index of the leading edge lower potential line
-        leading_edge_lower_potential_lines.append(potential_line_leading_edge_lower)
-    last_index_leading_edge_lower = index_leading_edge_lower  # this is the last index of the leading edge lower potential lines
-    ####lower normal lines extending from the aft stagnation streamline
-    trailing_edge_lower_potential_lines = []
-    index_trailing_edge_lower = last_index_leading_edge_lower
-    for i in tqdm(range(len(aft_stag_streamline)), desc="Calculating Trailing Edge Lower Potential Lines", unit="streamline"):
-        x_start, y_start = aft_stag_streamline[i, 0], aft_stag_streamline[i, 1]
-        start_point = np.array([x_start, y_start])
-        potential_line_trailing_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
-        potential_line_trailing_edge_lower = mesh.make_N_by_2_an_N_by_three(potential_line_trailing_edge_lower, index_trailing_edge_lower)  # add index column starting from first_index_trailing_edge_lower + 1
-        index_trailing_edge_lower = potential_line_trailing_edge_lower[-1, 2]  # last index of the trailing edge lower potential line
-        trailing_edge_lower_potential_lines.append(potential_line_trailing_edge_lower)
-    last_index_trailing_edge_lower = index_trailing_edge_lower  # this is the last index of the trailing edge lower potential lines
+    #### check if the mesh file already exists
+    if os.path.exists(mesh.mesh_filename):
+        # print("Mesh file already exists:", mesh.mesh_filename)
+        mesh_file_already_exists = True
+    else:
+        mesh_file_already_exists = False
+    if mesh.is_generate_mesh and not mesh_file_already_exists:
+        mesh.theta_aft = mesh.calculate_aft_stagnation_theta_in_Chi_from_Gamma(mesh.circulation)
+        mesh.theta_forward = mesh.calculate_forward_stag_theta_in_Chi_from_aft_stag_theta(mesh.theta_aft)
+        mesh.forward_stag, mesh.aft_stag = mesh.calculate_forward_and_aft_stag_locations_in_z(mesh.theta_aft)
+        mesh.get_full_geometry_zeta(mesh.surface_nodes, mesh.theta_aft, mesh.theta_forward, 2*np.pi + mesh.theta_aft)
+        mesh.get_full_geometry()
+        mesh.shift_joukowski_cylinder()
+        mesh.calc_unshifted_limits()
+        midline_start_points = mesh.create_body_mesh()
+        
+        marker_size = 0.1
+        last_body_index = mesh.last_body_index
+        #### streamlines geometrically spaced from the stagnation points
+        forward_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1)[1:]
+        forward_stag_streamline = mesh.make_N_by_2_an_N_by_three(forward_stag_streamline, last_body_index)  # add index column starting from last_body_index + 1
+        last_index_forward_stag = forward_stag_streamline[-1, 2]  # last index of the forward stagnation streamline
+        aft_stag_streamline = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, 1)[1:]
+        aft_stag_streamline = mesh.make_N_by_2_an_N_by_three(aft_stag_streamline, last_index_forward_stag)  # add index column starting from last_index_forward_stag + 1
+        last_index_aft_stag = aft_stag_streamline[-1, 2]  # last index of the aft stagnation streamline
+        #### upper midline ####
+        upper_midline = mesh.calc_wrapped_stream_or_potential_line(mesh.closest_upper_point[:2],direction=1,psi_targets=None,func=mesh.unit_normal_velocity)[1:]  # drop the first point (which is the surface point)
+        upper_stream_function_values = np.array([mesh.stream_function(p) for p in upper_midline])
+        matched_upper_lines = []
+        last_index_upper_midline = last_index_aft_stag 
+        for i in tqdm(range(len(mesh.upper_coords)), desc="Calculating Upper Surface Potential Lines", unit="line"):
+            if not np.allclose(mesh.upper_coords[i, :2], mesh.closest_upper_point[:2]): # check if the point is not the closest upper point, the :2 means we only take the first two coordinates (x and y)
+                start_point = mesh.upper_coords[i, :2]
+                matched_line = mesh.calc_wrapped_stream_or_potential_line(start_point,direction=1,psi_targets=upper_stream_function_values,func=mesh.unit_normal_velocity)[1:]  # skip surface point again
+                matched_line = mesh.make_N_by_2_an_N_by_three(matched_line, last_index_upper_midline)  # add index column starting from last_index + 1
+                last_index_upper_midline = matched_line[-1, 2]  # update the last index of the upper midline
+                matched_upper_lines.append(matched_line)
+            else:
+                upper_midline = mesh.make_N_by_2_an_N_by_three(upper_midline, last_index_upper_midline)  # add index column starting from last_index_aft_stag + 1
+                matched_upper_lines.append(upper_midline)
+                last_index_upper_midline = upper_midline[-1, 2]  # update the last index of the upper midline
+        last_upper_midline_index = last_index_upper_midline 
+        #### lower midline ####
+        lower_midline = mesh.calc_wrapped_stream_or_potential_line(mesh.closest_lower_point[:2],direction=-1,psi_targets=None,func=mesh.unit_normal_velocity)[1:]  # drop the first point (which is the surface point)
+        lower_stream_function_values = np.array([mesh.stream_function(p) for p in lower_midline])
+        matched_lower_lines = []
+        last_index_lower_midline = last_upper_midline_index  # start from the last index of the upper midline
+        for j in tqdm(range(len(mesh.lower_coords)), desc="Calculating Lower Surface Potential Lines", unit="line"):
+            if not np.allclose(mesh.lower_coords[j, :2], mesh.closest_lower_point[:2]):
+                start_point = mesh.lower_coords[j, :2]
+                matched_line = mesh.calc_wrapped_stream_or_potential_line(start_point,direction=-1,psi_targets=lower_stream_function_values,func=mesh.unit_normal_velocity)[1:]
+                matched_line = mesh.make_N_by_2_an_N_by_three(matched_line, last_index_lower_midline)  # add index column starting from last_index_lower_midline + 1
+                last_index_lower_midline = matched_line[-1, 2]  # update the last index of the lower midline
+                matched_lower_lines.append(matched_line)
+            else:
+                lower_midline = mesh.make_N_by_2_an_N_by_three(lower_midline, last_index_lower_midline)  # add index column starting from last_index_lower_midline + 1
+                matched_lower_lines.append(lower_midline)
+                last_index_lower_midline = lower_midline[-1, 2]
+        last_lower_midline_index = last_index_lower_midline  # this is the last index of the lower midline
+        #### calculate normal lines extending downward from the stagnation points ####
+        lower_stag_potential_forward = mesh.calc_wrapped_stream_or_potential_line(mesh.forward_stag, -1, psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface point
+        lower_stag_potential_forward = mesh.make_N_by_2_an_N_by_three(lower_stag_potential_forward, last_lower_midline_index) 
+        last_index_lower_potential_forward = lower_stag_potential_forward[-1, 2]  # last index of the lower stagnation potential line
+        lower_stag_potential_aft = mesh.calc_wrapped_stream_or_potential_line(mesh.aft_stag, -1, psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface point
+        lower_stag_potential_aft = mesh.make_N_by_2_an_N_by_three(lower_stag_potential_aft, last_index_lower_potential_forward)  # add index column starting from last_index_lower_potential_forward + 1
+        last_index_lower_potential_aft = lower_stag_potential_aft[-1, 2]  # last index of the lower stagnation potential line
+        #### forward stagnation potential lines extending from the forward stagnation streamline ####
+        leading_edge_upper_potential_lines = []
+        index_leading_edge_upper = last_index_lower_potential_aft
+        for i in tqdm(range(len(forward_stag_streamline)), desc="Calculating Leading Edge Upper Potential Lines", unit="streamline"):
+            x_start, y_start = forward_stag_streamline[i, 0], forward_stag_streamline[i, 1]
+            start_point = np.array([x_start, y_start])
+            potential_line_leading_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]  # skip surface normal point
+            potential_line_leading_edge_upper = mesh.make_N_by_2_an_N_by_three(potential_line_leading_edge_upper, index_leading_edge_upper)  # add index column starting from first_index_leading_edge_upper + 1
+            index_leading_edge_upper = potential_line_leading_edge_upper[-1, 2]  # update the last index of the leading edge upper potential line
+            leading_edge_upper_potential_lines.append(potential_line_leading_edge_upper)
+        last_index_leading_edge_upper = index_leading_edge_upper  # this is the last index of the leading edge upper potential lines
+        #### upper normal lines extending from the aft stagnation streamline ####
+        trailing_edge_upper_potential_lines = []
+        index_trailing_edge_upper = last_index_leading_edge_upper
+        for i in tqdm(range(len(aft_stag_streamline)), desc="Calculating Trailing Edge Upper Potential Lines", unit="streamline"):
+            x_start, y_start = aft_stag_streamline[i, 0], aft_stag_streamline[i, 1]
+            start_point = np.array([x_start, y_start])
+            potential_line_trailing_edge_upper = mesh.calc_wrapped_stream_or_potential_line(start_point, 1,psi_targets=upper_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
+            potential_line_trailing_edge_upper = mesh.make_N_by_2_an_N_by_three(potential_line_trailing_edge_upper, index_trailing_edge_upper)  # add index column starting from first_index_trailing_edge_upper + 1
+            index_trailing_edge_upper = potential_line_trailing_edge_upper[-1, 2]  # last index of the trailing edge upper potential line
+            trailing_edge_upper_potential_lines.append(potential_line_trailing_edge_upper)
+        last_index_trailing_edge_upper = index_trailing_edge_upper  # this is the last index of the trailing edge upper potential lines
+        #### lower normal lines extending from the stagnation streamlines starting with the forward stagnation streamline ####
+        leading_edge_lower_potential_lines = []
+        index_leading_edge_lower = last_index_trailing_edge_upper
+        for i in tqdm(range(len(forward_stag_streamline)), desc="Calculating Leading Edge Lower Potential Lines", unit="streamline"):
+            x_start, y_start = forward_stag_streamline[i, 0], forward_stag_streamline[i, 1]
+            start_point = np.array([x_start, y_start])
+            potential_line_leading_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
+            potential_line_leading_edge_lower = mesh.make_N_by_2_an_N_by_three(potential_line_leading_edge_lower, index_leading_edge_lower)  # add index column starting from first_index_leading_edge_lower + 1
+            index_leading_edge_lower = potential_line_leading_edge_lower[-1, 2]  # update the last index of the leading edge lower potential line
+            leading_edge_lower_potential_lines.append(potential_line_leading_edge_lower)
+        last_index_leading_edge_lower = index_leading_edge_lower  # this is the last index of the leading edge lower potential lines
+        ####lower normal lines extending from the aft stagnation streamline
+        trailing_edge_lower_potential_lines = []
+        index_trailing_edge_lower = last_index_leading_edge_lower
+        for i in tqdm(range(len(aft_stag_streamline)), desc="Calculating Trailing Edge Lower Potential Lines", unit="streamline"):
+            x_start, y_start = aft_stag_streamline[i, 0], aft_stag_streamline[i, 1]
+            start_point = np.array([x_start, y_start])
+            potential_line_trailing_edge_lower = mesh.calc_wrapped_stream_or_potential_line(start_point, -1,psi_targets=lower_stream_function_values, func=mesh.unit_normal_velocity, radial_growth=mesh.radial_growth)[1:]
+            potential_line_trailing_edge_lower = mesh.make_N_by_2_an_N_by_three(potential_line_trailing_edge_lower, index_trailing_edge_lower)  # add index column starting from first_index_trailing_edge_lower + 1
+            index_trailing_edge_lower = potential_line_trailing_edge_lower[-1, 2]  # last index of the trailing edge lower potential line
+            trailing_edge_lower_potential_lines.append(potential_line_trailing_edge_lower)
+        last_index_trailing_edge_lower = index_trailing_edge_lower  # this is the last index of the trailing edge lower potential lines
+        # create a list of all the xy points in the entire mesh 
+        unshifted_xy_points_of_entire_mesh = []
+        #### start with the upper and lower surface points
+        for i in range(len(mesh.upper_coords)):
+            unshifted_xy_points_of_entire_mesh.append(mesh.upper_coords[i])
+        for j in range(len(mesh.lower_coords)):
+            unshifted_xy_points_of_entire_mesh.append(mesh.lower_coords[j])
+        #### now add the forward and aft stagnation streamlines
+        for i in range(len(forward_stag_streamline)):
+            unshifted_xy_points_of_entire_mesh.append(forward_stag_streamline[i])
+        for j in range(len(aft_stag_streamline)):
+            unshifted_xy_points_of_entire_mesh.append(aft_stag_streamline[j])
+        #### now add the matched upper lines
+        for i in range(len(matched_upper_lines)):
+            for j in range(len(matched_upper_lines[i])):
+                unshifted_xy_points_of_entire_mesh.append(matched_upper_lines[i][j])
+        #### now add the matched lower lines
+        for i in range(len(matched_lower_lines)):
+            for j in range(len(matched_lower_lines[i])):
+                unshifted_xy_points_of_entire_mesh.append(matched_lower_lines[i][j])
+        #### now add the leading edge upper potential lines
+        for i in range(len(leading_edge_upper_potential_lines)):
+            for j in range(len(leading_edge_upper_potential_lines[i])):
+                unshifted_xy_points_of_entire_mesh.append(leading_edge_upper_potential_lines[i][j])
+        #### now add the trailing edge upper potential lines
+        for i in range(len(trailing_edge_upper_potential_lines)):
+            for j in range(len(trailing_edge_upper_potential_lines[i])):
+                unshifted_xy_points_of_entire_mesh.append(trailing_edge_upper_potential_lines[i][j])
+        #### now add the leading edge lower potential lines
+        for i in range(len(leading_edge_lower_potential_lines)):
+            for j in range(len(leading_edge_lower_potential_lines[i])):
+                unshifted_xy_points_of_entire_mesh.append(leading_edge_lower_potential_lines[i][j])
+        #### now add the trailing edge lower potential lines
+        for i in range(len(trailing_edge_lower_potential_lines)):
+            for j in range(len(trailing_edge_lower_potential_lines[i])):
+                unshifted_xy_points_of_entire_mesh.append(trailing_edge_lower_potential_lines[i][j])
+        #### now add the lower stagnation potential lines
+        for i in range(len(lower_stag_potential_forward)):
+            unshifted_xy_points_of_entire_mesh.append(lower_stag_potential_forward[i])
+        for j in range(len(lower_stag_potential_aft)):
+            unshifted_xy_points_of_entire_mesh.append(lower_stag_potential_aft[j])
 
 
-    #### now we have all the points, start connecting them into cells starting with the upper surface which connects to forward_stag_streamline, matched_upper_lines, and the first lines in leading_edge_upper_potential_lines and trailing_edge_upper_potential_lines
-    cells = [] # will contain the cells (4 indices each) on (directly touching) or right next to, the body mesh
-    cell_one = np.array(([mesh.upper_coords[0], aft_stag_streamline[0], trailing_edge_upper_potential_lines[0][0], matched_upper_lines[0][0]]))
-    cells.append(cell_one)  # first cell is the first point of the upper surface, the first point of the aft stagnation streamline, the first point of the matched upper line, and the first point of the leading edge upper potential line
+        #### now we have all the points, start connecting them into cells starting with the upper surface which connects to forward_stag_streamline, matched_upper_lines, and the first lines in leading_edge_upper_potential_lines and trailing_edge_upper_potential_lines
+        cells = [] # will contain the cells (4 indices each) on (directly touching) or right next to, the body mesh
+        cell_one = np.array(([mesh.upper_coords[0], aft_stag_streamline[0], trailing_edge_upper_potential_lines[0][0], matched_upper_lines[0][0]]))
+        cells.append(cell_one)  # first cell is the first point of the upper surface, the first point of the aft stagnation streamline, the first point of the matched upper line, and the first point of the leading edge upper potential line
 
-    #### now loop through the upper surface points and connect them to the adjacent surface point and the appropriate matched upper line 
-    for i in range(1, len(mesh.upper_coords)):
-        # connect the upper surface point to the next point in the upper surface, the next point in the aft stagnation streamline, the next point in the matched upper line, and the next point in the leading edge upper potential line
-        cell = np.array(([mesh.upper_coords[i], mesh.upper_coords[i-1], matched_upper_lines[i-1][0], matched_upper_lines[i][0]]))
-        cells.append(cell)
-    
-    #### now connect the last point of the upper surface to the first point of the forward stagnation streamline, the first point of the matched upper line, and the first point of the leading edge upper potential line
-    cell_last_upper = np.array(([forward_stag_streamline[0], mesh.upper_coords[-1],  matched_upper_lines[-1][0], leading_edge_upper_potential_lines[0][0]]))
-    cells.append(cell_last_upper)  # last cell is the first point of the forward stagnation streamline, the last point of the upper surface, the last point of the matched upper line, and the first point of the leading edge upper potential line
-    #### now connect the lower surface points 
-    cell_one_lower = np.array(([leading_edge_lower_potential_lines[0][0], lower_stag_potential_forward[0], mesh.upper_coords[-1], forward_stag_streamline[0]]))
-    cells.append(cell_one_lower)  # first cell is the first point of the lower stagnation potential line, the first point of the trailing edge lower potential line, the first point of the aft stagnation streamline, and the first point of the upper surface
-    cell_two_lower = np.array(([lower_stag_potential_forward[0], matched_lower_lines[0][0],  mesh.lower_coords[0], mesh.upper_coords[-1]]))
-    cells.append(cell_two_lower)  # second cell is the first point of the matched lower line, the first point of the lower stagnation potential line, the first point of the upper surface, and the first point of the lower surface
-    
-    #### now loop through the lower surface points and connect them to the adjacent surface point and the appropriate matched lower line
-    for i in range(1, len(mesh.lower_coords)):
-        # connect the lower surface point to the next point in the lower surface, the next point in the matched lower line, and the next point in the trailing edge lower potential line
-        cell = np.array(([matched_lower_lines[i-1][0], matched_lower_lines[i][0], mesh.lower_coords[i], mesh.lower_coords[i-1]]))
-        cells.append(cell)
+        #### now loop through the upper surface points and connect them to the adjacent surface point and the appropriate matched upper line 
+        for i in range(1, len(mesh.upper_coords)):
+            # connect the upper surface point to the next point in the upper surface, the next point in the aft stagnation streamline, the next point in the matched upper line, and the next point in the leading edge upper potential line
+            cell = np.array(([mesh.upper_coords[i], mesh.upper_coords[i-1], matched_upper_lines[i-1][0], matched_upper_lines[i][0]]))
+            cells.append(cell)
+        
+        #### now connect the last point of the upper surface to the first point of the forward stagnation streamline, the first point of the matched upper line, and the first point of the leading edge upper potential line
+        cell_last_upper = np.array(([forward_stag_streamline[0], mesh.upper_coords[-1],  matched_upper_lines[-1][0], leading_edge_upper_potential_lines[0][0]]))
+        cells.append(cell_last_upper)  # last cell is the first point of the forward stagnation streamline, the last point of the upper surface, the last point of the matched upper line, and the first point of the leading edge upper potential line
+        #### now connect the lower surface points 
+        cell_one_lower = np.array(([leading_edge_lower_potential_lines[0][0], lower_stag_potential_forward[0], mesh.upper_coords[-1], forward_stag_streamline[0]]))
+        cells.append(cell_one_lower)  # first cell is the first point of the lower stagnation potential line, the first point of the trailing edge lower potential line, the first point of the aft stagnation streamline, and the first point of the upper surface
+        cell_two_lower = np.array(([lower_stag_potential_forward[0], matched_lower_lines[0][0],  mesh.lower_coords[0], mesh.upper_coords[-1]]))
+        cells.append(cell_two_lower)  # second cell is the first point of the matched lower line, the first point of the lower stagnation potential line, the first point of the upper surface, and the first point of the lower surface
+        
+        #### now loop through the lower surface points and connect them to the adjacent surface point and the appropriate matched lower line
+        for i in range(1, len(mesh.lower_coords)):
+            # connect the lower surface point to the next point in the lower surface, the next point in the matched lower line, and the next point in the trailing edge lower potential line
+            cell = np.array(([matched_lower_lines[i-1][0], matched_lower_lines[i][0], mesh.lower_coords[i], mesh.lower_coords[i-1]]))
+            cells.append(cell)
 
-    #### now get the second to last and last cells in the lower surface
-    cell_second_last_lower = np.array(([matched_lower_lines[-1][0], lower_stag_potential_aft[0], mesh.upper_coords[0], mesh.lower_coords[-1]]))
-    cells.append(cell_second_last_lower)  # second to last cell is the last point of the matched lower line, the first point of the lower stagnation potential line, the first point of the upper surface, and the last point of the lower surface
+        #### now get the second to last and last cells in the lower surface
+        cell_second_last_lower = np.array(([matched_lower_lines[-1][0], lower_stag_potential_aft[0], mesh.upper_coords[0], mesh.lower_coords[-1]]))
+        cells.append(cell_second_last_lower)  # second to last cell is the last point of the matched lower line, the first point of the lower stagnation potential line, the first point of the upper surface, and the last point of the lower surface
 
-    #### now for the last body cell
-    cell_last_lower = np.array(([lower_stag_potential_aft[0], trailing_edge_lower_potential_lines[0][0], aft_stag_streamline[0], mesh.upper_coords[0]]))
-    cells.append(cell_last_lower)  # last cell is the first point of the lower stagnation potential line, the first point of the trailing edge lower potential line, the first point of the aft stagnation streamline, and the first point of the upper surface
+        #### now for the last body cell
+        cell_last_lower = np.array(([lower_stag_potential_aft[0], trailing_edge_lower_potential_lines[0][0], aft_stag_streamline[0], mesh.upper_coords[0]]))
+        cells.append(cell_last_lower)  # last cell is the first point of the lower stagnation potential line, the first point of the trailing edge lower potential line, the first point of the aft stagnation streamline, and the first point of the upper surface
 
-    #### now create cells on the forward stagnation streamline (above and below the streamline)
-    for i in range(len(forward_stag_streamline)-1):
-        upper_cell = np.array(([forward_stag_streamline[i + 1], forward_stag_streamline[i], leading_edge_upper_potential_lines[i][0], leading_edge_upper_potential_lines[i + 1][0]]))
-        cells.append(upper_cell)  # upper cell is the next point in the forward stagnation streamline, the current point in the forward stagnation streamline, the next point in the leading edge upper potential line, and the next point in the leading edge upper potential line
-        lower_cell = np.array(([leading_edge_lower_potential_lines[i+1][0], leading_edge_lower_potential_lines[i][0], forward_stag_streamline[i], forward_stag_streamline[i + 1]]))
-        cells.append(lower_cell)  # lower cell is the next point in the leading edge lower potential line, the current point in the leading edge lower potential line, the current point in the forward stagnation streamline, and the next point in the forward stagnation streamline
-    #### now create cells on the aft stagnation streamline (above and below the streamline)
-    for i in range(len(aft_stag_streamline)-1):
-        upper_cell = np.array(([aft_stag_streamline[i], aft_stag_streamline[i + 1], trailing_edge_upper_potential_lines[i+1][0], trailing_edge_upper_potential_lines[i][0]]))
-        cells.append(upper_cell)  # upper cell is the current point in the aft stagnation streamline, the next point in the aft stagnation streamline, the next point in the trailing edge upper potential line, and the current point in the trailing edge upper potential line
-        lower_cell = np.array(([trailing_edge_lower_potential_lines[i][0], trailing_edge_lower_potential_lines[i + 1][0], aft_stag_streamline[i + 1], aft_stag_streamline[i]]))
-        cells.append(lower_cell)  # lower cell is the current point in the trailing edge lower potential line, the next point in the trailing edge lower potential line, the next point in the aft stagnation streamline, and the current point in the aft stagnation streamline
-    #### create cells on the upper and lower potential lines. Start with the leading edge upper potential lines
-    for i in range(len(leading_edge_upper_potential_lines)-1):
-        for j in range(len(leading_edge_upper_potential_lines[i])-1):
-            upper_cell = np.array(([leading_edge_upper_potential_lines[i+1][j], leading_edge_upper_potential_lines[i][j], leading_edge_upper_potential_lines[i][j+1], leading_edge_upper_potential_lines[i+1][j+1]]))
-            cells.append(upper_cell)  # upper cell is the next point in the leading edge upper potential line, the current point in the leading edge upper potential line, the current point in the next point in the leading edge upper potential line, and the next point in the next point in the leading edge upper potential line
-    #### make cells in a similar fashion for the leading edge lower potential lines
-    for i in range(len(leading_edge_lower_potential_lines)-1):
-        for j in range(len(leading_edge_lower_potential_lines[i])-1):
-            lower_cell = np.array(([leading_edge_lower_potential_lines[i+1][j+1], leading_edge_lower_potential_lines[i][j+1], leading_edge_lower_potential_lines[i][j], leading_edge_lower_potential_lines[i+1][j]]))
-            cells.append(lower_cell)
-    #### now do the same for the trailing edge upper potential lines
-    for i in range(len(trailing_edge_upper_potential_lines)-1):
-        for j in range(len(trailing_edge_upper_potential_lines[i])-1):
-            upper_cell = np.array(([trailing_edge_upper_potential_lines[i][j], trailing_edge_upper_potential_lines[i+1][j], trailing_edge_upper_potential_lines[i+1][j+1], trailing_edge_upper_potential_lines[i][j+1]]))
-            cells.append(upper_cell)     
-    #### do the same for the trailing edge lower potential lines
-    for i in range(len(trailing_edge_lower_potential_lines)-1):
-        for j in range(len(trailing_edge_lower_potential_lines[i])-1):
-            lower_cell = np.array(([trailing_edge_lower_potential_lines[i][j+1], trailing_edge_lower_potential_lines[i+1][j+1], trailing_edge_lower_potential_lines[i+1][j], trailing_edge_lower_potential_lines[i][j]]))
-            cells.append(lower_cell)   
-    #### finally, create cells for the matched upper and lower lines, starting with the first matched upper line (the one associated with the aft stagnation streamline)
-    print("length of matched upper lines:", len(matched_upper_lines[0]))
-    for i in range(len(matched_upper_lines[0])-1):
-        upper_cell = np.array(([matched_upper_lines[0][i], trailing_edge_upper_potential_lines[0][i], trailing_edge_upper_potential_lines[0][i+1], matched_upper_lines[0][i+1]]))
-        cells.append(upper_cell)  # upper cell is the current point in the matched upper line, the current point in the trailing edge upper potential line, the next point in the trailing edge upper potential line, and the next point in the matched upper line
-    #### now do the last matched upper line (the one associated with the leading edge upper potential line)
-    for i in range(len(matched_upper_lines[-1])-1):
-        upper_cell = np.array(([leading_edge_upper_potential_lines[0][i], matched_upper_lines[-1][i], matched_upper_lines[-1][i+1], leading_edge_upper_potential_lines[0][i+1]]))
-        cells.append(upper_cell)  # upper cell is the current point in the leading edge upper potential line, the current point in the matched upper line, the next point in the matched upper line, and the next point in the leading edge upper potential line
-    #### now loop through the matched_upper_lines and create cells for each matched upper line (that doesn't border with the leading or trailing edge upper potential lines)
-    for i in range(len(matched_upper_lines)-1):
-        for j in range(len(matched_upper_lines[i])-1):
-            upper_cell = np.array(([matched_upper_lines[i+1][j], matched_upper_lines[i][j], matched_upper_lines[i][j+1], matched_upper_lines[i+1][j+1]]))
-            cells.append(upper_cell)
-    #### now loop through the lower stagnation potential lines and create cells that meet with the leading and trailing edge lower potential lines
-    for i in range(len(lower_stag_potential_forward)-1): ##### adjust to hit either side of the leading edge lower potential line
-        lower_stag_cell = np.array(([leading_edge_lower_potential_lines[0][i+1], lower_stag_potential_forward[i+1],  lower_stag_potential_forward[i], leading_edge_lower_potential_lines[0][i]]))
-        cells.append(lower_stag_cell)  # lower cell is the next point in the leading edge lower potential line, the next point in the lower stagnation potential line, the current point in the lower stagnation potential line, and the current point in the leading edge lower potential line
-    #### now loop through the lower stagnation potential line and connect it to the trailing edge lower potential line
-    for i in range(len(lower_stag_potential_aft)-1): ##### adjust to hit either side of the trailing edge lower potential line
-        lower_stag_cell = np.array(([lower_stag_potential_aft[i+1], trailing_edge_lower_potential_lines[0][i+1], trailing_edge_lower_potential_lines[0][i], lower_stag_potential_aft[i]]))
-        cells.append(lower_stag_cell)
-        # print("lower stagnation cell :", lower_stag_cell[:, 2])
-    #### finally loop through the matched lower lines and create cells for each matched lower line (that doesn't border with the leading or trailing edge lower potential lines)
-    for i in range(len(matched_lower_lines)-1):
-        for j in range(len(matched_lower_lines[i])-1):
-            lower_cell = np.array(([matched_lower_lines[i+1][j], matched_lower_lines[i][j], matched_lower_lines[i][j+1], matched_lower_lines[i+1][j+1]]))
-            cells.append(lower_cell)
+        #### now create cells on the forward stagnation streamline (above and below the streamline)
+        for i in range(len(forward_stag_streamline)-1):
+            upper_cell = np.array(([forward_stag_streamline[i + 1], forward_stag_streamline[i], leading_edge_upper_potential_lines[i][0], leading_edge_upper_potential_lines[i + 1][0]]))
+            cells.append(upper_cell)  # upper cell is the next point in the forward stagnation streamline, the current point in the forward stagnation streamline, the next point in the leading edge upper potential line, and the next point in the leading edge upper potential line
+            lower_cell = np.array(([leading_edge_lower_potential_lines[i+1][0], leading_edge_lower_potential_lines[i][0], forward_stag_streamline[i], forward_stag_streamline[i + 1]]))
+            cells.append(lower_cell)  # lower cell is the next point in the leading edge lower potential line, the current point in the leading edge lower potential line, the current point in the forward stagnation streamline, and the next point in the forward stagnation streamline
+        #### now create cells on the aft stagnation streamline (above and below the streamline)
+        for i in range(len(aft_stag_streamline)-1):
+            upper_cell = np.array(([aft_stag_streamline[i], aft_stag_streamline[i + 1], trailing_edge_upper_potential_lines[i+1][0], trailing_edge_upper_potential_lines[i][0]]))
+            cells.append(upper_cell)  # upper cell is the current point in the aft stagnation streamline, the next point in the aft stagnation streamline, the next point in the trailing edge upper potential line, and the current point in the trailing edge upper potential line
+            lower_cell = np.array(([trailing_edge_lower_potential_lines[i][0], trailing_edge_lower_potential_lines[i + 1][0], aft_stag_streamline[i + 1], aft_stag_streamline[i]]))
+            cells.append(lower_cell)  # lower cell is the current point in the trailing edge lower potential line, the next point in the trailing edge lower potential line, the next point in the aft stagnation streamline, and the current point in the aft stagnation streamline
+        #### create cells on the upper and lower potential lines. Start with the leading edge upper potential lines
+        for i in range(len(leading_edge_upper_potential_lines)-1):
+            for j in range(len(leading_edge_upper_potential_lines[i])-1):
+                upper_cell = np.array(([leading_edge_upper_potential_lines[i+1][j], leading_edge_upper_potential_lines[i][j], leading_edge_upper_potential_lines[i][j+1], leading_edge_upper_potential_lines[i+1][j+1]]))
+                cells.append(upper_cell)  # upper cell is the next point in the leading edge upper potential line, the current point in the leading edge upper potential line, the current point in the next point in the leading edge upper potential line, and the next point in the next point in the leading edge upper potential line
+        #### make cells in a similar fashion for the leading edge lower potential lines
+        for i in range(len(leading_edge_lower_potential_lines)-1):
+            for j in range(len(leading_edge_lower_potential_lines[i])-1):
+                lower_cell = np.array(([leading_edge_lower_potential_lines[i+1][j+1], leading_edge_lower_potential_lines[i][j+1], leading_edge_lower_potential_lines[i][j], leading_edge_lower_potential_lines[i+1][j]]))
+                cells.append(lower_cell)
+        #### now do the same for the trailing edge upper potential lines
+        for i in range(len(trailing_edge_upper_potential_lines)-1):
+            for j in range(len(trailing_edge_upper_potential_lines[i])-1):
+                upper_cell = np.array(([trailing_edge_upper_potential_lines[i][j], trailing_edge_upper_potential_lines[i+1][j], trailing_edge_upper_potential_lines[i+1][j+1], trailing_edge_upper_potential_lines[i][j+1]]))
+                cells.append(upper_cell)     
+        #### do the same for the trailing edge lower potential lines
+        for i in range(len(trailing_edge_lower_potential_lines)-1):
+            for j in range(len(trailing_edge_lower_potential_lines[i])-1):
+                lower_cell = np.array(([trailing_edge_lower_potential_lines[i][j+1], trailing_edge_lower_potential_lines[i+1][j+1], trailing_edge_lower_potential_lines[i+1][j], trailing_edge_lower_potential_lines[i][j]]))
+                cells.append(lower_cell)   
+        #### finally, create cells for the matched upper and lower lines, starting with the first matched upper line (the one associated with the aft stagnation streamline)
+        for i in range(len(matched_upper_lines[0])-1):
+            upper_cell = np.array(([matched_upper_lines[0][i], trailing_edge_upper_potential_lines[0][i], trailing_edge_upper_potential_lines[0][i+1], matched_upper_lines[0][i+1]]))
+            cells.append(upper_cell)  # upper cell is the current point in the matched upper line, the current point in the trailing edge upper potential line, the next point in the trailing edge upper potential line, and the next point in the matched upper line
+        #### now do the last matched upper line (the one associated with the leading edge upper potential line)
+        for i in range(len(matched_upper_lines[-1])-1):
+            upper_cell = np.array(([leading_edge_upper_potential_lines[0][i], matched_upper_lines[-1][i], matched_upper_lines[-1][i+1], leading_edge_upper_potential_lines[0][i+1]]))
+            cells.append(upper_cell)  # upper cell is the current point in the leading edge upper potential line, the current point in the matched upper line, the next point in the matched upper line, and the next point in the leading edge upper potential line
+        #### now loop through the matched_upper_lines and create cells for each matched upper line (that doesn't border with the leading or trailing edge upper potential lines)
+        for i in range(len(matched_upper_lines)-1):
+            for j in range(len(matched_upper_lines[i])-1):
+                upper_cell = np.array(([matched_upper_lines[i+1][j], matched_upper_lines[i][j], matched_upper_lines[i][j+1], matched_upper_lines[i+1][j+1]]))
+                cells.append(upper_cell)
+        #### now loop through the lower stagnation potential lines and create cells that meet with the leading and trailing edge lower potential lines
+        for i in range(len(lower_stag_potential_forward)-1): ##### adjust to hit either side of the leading edge lower potential line
+            lower_stag_cell_left = np.array(([leading_edge_lower_potential_lines[0][i+1], lower_stag_potential_forward[i+1],  lower_stag_potential_forward[i], leading_edge_lower_potential_lines[0][i]]))
+            cells.append(lower_stag_cell_left)  # lower cell is the next point in the leading edge lower potential line, the next point in the lower stagnation potential line, the current point in the lower stagnation potential line, and the current point in the leading edge lower potential line
+            lower_stag_cell_right = np.array(([lower_stag_potential_forward[i+1], matched_lower_lines[0][i+1], matched_lower_lines[0][i], lower_stag_potential_forward[i]]))
+            cells.append(lower_stag_cell_right)  # lower cell is the next point in the lower stagnation potential line, the next point in the matched lower line, the current point in the matched lower line, and the current point in the lower stagnation potential line
+        ### now loop through the lower stagnation potential line and connect it to the trailing edge lower potential line
+        for i in range(len(lower_stag_potential_aft)-1): ##### adjust to hit either side of the trailing edge lower potential line
+            lower_stag_cell_right = np.array(([lower_stag_potential_aft[i+1], trailing_edge_lower_potential_lines[0][i+1], trailing_edge_lower_potential_lines[0][i], lower_stag_potential_aft[i]]))
+            cells.append(lower_stag_cell_right)  # lower cell is the next point in the lower stagnation potential line, the next point in the trailing edge lower potential line, the current point in the trailing edge lower potential line, and the current point in the lower stagnation potential line
+            lower_stag_cell_left = np.array(([matched_lower_lines[-1][i+1], lower_stag_potential_aft[i+1], lower_stag_potential_aft[i], matched_lower_lines[-1][i]]))
+            cells.append(lower_stag_cell_left)  # lower cell is the next point in the matched lower line, the next point in the lower stagnation potential line, the current point in the lower stagnation potential line, and the current point in the matched lower line
+        #### finally loop through the matched lower lines and create cells for each matched lower line (that doesn't border with the leading or trailing edge lower potential lines)
+        for i in range(len(matched_lower_lines)-1):
+            for j in range(len(matched_lower_lines[i])-1):
+                lower_cell = np.array(([matched_lower_lines[i][j+1], matched_lower_lines[i+1][j+1], matched_lower_lines[i+1][j], matched_lower_lines[i][j]]))
+                # print("matched lower cell :", lower_cell[:, 2])
+                cells.append(lower_cell)
 
-    
 
+        #### now create a list for the inner boundary lines 
+        inner_boundary_lines = []
+        for i in range(len(mesh.upper_coords)-1):
+            line = mesh.upper_coords[i], mesh.upper_coords[i+1]
+            inner_boundary_lines.append(line)
+        # append the last upper_coords point to the first lower_coords point
+        leading_edge_line = mesh.upper_coords[-1], mesh.lower_coords[0]
+        inner_boundary_lines.append(leading_edge_line)
+        
+        for j in range(len(mesh.lower_coords)-1):
+            line = mesh.lower_coords[j], mesh.lower_coords[j+1]
+            inner_boundary_lines.append(line)
+        # append the last lower_coords point to the first upper_coords point
+        trailing_edge_line = mesh.lower_coords[-1], mesh.upper_coords[0]
+        inner_boundary_lines.append(trailing_edge_line)
+        # now make inner boundary lines only have the index column (delete the x and y columns
+        inner_boundary_lines = [(int(line[0][2]), int(line[1][2])) for line in inner_boundary_lines]
 
-    
+        #### now create a list for the outer boundary lines. 
+        outer_boundary_lines = []
+        #### start with the matched upper lines
+        for i in range(len(matched_upper_lines)-1):
+            # the point is the last point of the current matched upper line and the last point of the next matched upper line
+            line = matched_upper_lines[i][-1], matched_upper_lines[i+1][-1]
+            outer_boundary_lines.append(line)
+        #### do the same for the matched lower lines
+        #### start with making a line from the last point of the lower leading edge potential line to the last point of the matched lower line
+        line = lower_stag_potential_forward[-1], matched_lower_lines[0][-1]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the matched lower line to the last point of the trailing edge lower potential line
+        #### now loop through the matched lower lines and create lines for each matched lower line (that doesn't border with the leading or trailing edge lower potential lines)
+        for i in range(len(matched_lower_lines)-1):
+            line = matched_lower_lines[i][-1], matched_lower_lines[i+1][-1]
+            outer_boundary_lines.append(line)
+        #### now create a line connecting the last point of matched lower lines to the last point of the trailing edge lower potential line
+        line = matched_lower_lines[-1][-1], lower_stag_potential_aft[-1]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the matched lower line to the last point of the trailing edge lower potential line
+        #### make first leading edge line from the last point of matched upper lines to the last point of the leading edge upper potential line
+        line = matched_upper_lines[-1][-1], leading_edge_upper_potential_lines[0][-1]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the matched upper line to the last point of the leading edge upper potential line
+        #### now loop through the leading edge upper potential lines and create lines for each leading edge upper potential line (that doesn't border with the trailing edge upper potential lines)
+        for i in range(len(leading_edge_upper_potential_lines)-1):
+            line = leading_edge_upper_potential_lines[i][-1], leading_edge_upper_potential_lines[i+1][-1]
+            outer_boundary_lines.append(line)
+        #### now every point in the last leading edge upper potential line should connect to the adjacent point in the upper potential line
+        for i in range(len(leading_edge_upper_potential_lines[-1])-1):
+            line = leading_edge_upper_potential_lines[-1][i], leading_edge_upper_potential_lines[-1][i+1]
+            outer_boundary_lines.append(line)
+        #### connect the last point of the leading edge streamline to the first point of the leading edge upper potential line
+        line = leading_edge_upper_potential_lines[-1][0], forward_stag_streamline[-1]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the leading edge upper potential line to the last point of the forward stagnation streamline
+        #### now connect the last point of the leading edge streamline to the first point of the last leading edge lower potential line
+        line = forward_stag_streamline[-1], leading_edge_lower_potential_lines[-1][0]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the leading edge streamline to the first point of the leading edge lower potential line
+        #### now loop through the leading edge lower potential lines and create lines for each leading edge lower potential line (that doesn't border with the trailing edge lower potential lines)
+        for i in range(len(leading_edge_lower_potential_lines[-1])-1):
+            line = leading_edge_lower_potential_lines[-1][i], leading_edge_lower_potential_lines[-1][i+1]
+            outer_boundary_lines.append(line)
+        #### now every point in the last leading edge lower potential line should connect to the adjacent point in the lower potential line
+        for i in range(len(leading_edge_lower_potential_lines)-1):
+            line = leading_edge_lower_potential_lines[i][-1], leading_edge_lower_potential_lines[i+1][-1]
+            outer_boundary_lines.append(line)
+        #### now connect the last point of the first leading edge lower potential line to the last point of the lower stagnation potential line
+        line = leading_edge_lower_potential_lines[0][-1], lower_stag_potential_forward[-1]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the leading edge lower potential line to the last point of the lower stagnation potential line
+        #### now connect the last point of the aft stagnation lower potential line to the last point of the trailing edge lower potential line
+        line = lower_stag_potential_aft[-1], trailing_edge_lower_potential_lines[0][-1]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the lower stagnation potential line to the last point of the trailing edge lower potential line
+        #### now loop through the trailing edge lower potential lines and create lines for each trailing edge lower potential line (that doesn't border with the leading edge lower potential lines)
+        for i in range(len(trailing_edge_lower_potential_lines)-1):
+            line = trailing_edge_lower_potential_lines[i][-1], trailing_edge_lower_potential_lines[i+1][-1]
+            outer_boundary_lines.append(line)
+        #### now every point in the last trailing edge lower potential line should connect to the adjacent point in the lower potential line
+        for i in range(len(trailing_edge_lower_potential_lines[-1])-1):
+            line = trailing_edge_lower_potential_lines[-1][i], trailing_edge_lower_potential_lines[-1][i+1]
+            outer_boundary_lines.append(line)
+        #### connect the last point of the trailing edge lower potential line to the last point of the trailing edge streamline
+        line = trailing_edge_lower_potential_lines[-1][-1], aft_stag_streamline[-1]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the trailing edge lower potential line to the last point of the aft stagnation streamline
+        #### now connect the last point of the trailing edge streamline to the last point of the last trailing edge upper potential line
+        line = aft_stag_streamline[-1], trailing_edge_upper_potential_lines[-1][0]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the trailing edge streamline to the last point of the trailing edge upper potential line
+        #### now loop through the trailing edge upper potential lines and create lines for each trailing edge upper potential line (that doesn't border with the leading edge upper potential lines)
+        for i in range(len(trailing_edge_upper_potential_lines[-1])-1):
+            line = trailing_edge_upper_potential_lines[-1][i], trailing_edge_upper_potential_lines[-1][i+1]
+            outer_boundary_lines.append(line)
+        #### now every point in the last trailing edge upper potential line should connect to the adjacent point in the upper potential line
+        for i in range(len(trailing_edge_upper_potential_lines)-1):
+            line = trailing_edge_upper_potential_lines[i][-1], trailing_edge_upper_potential_lines[i+1][-1]
+            outer_boundary_lines.append(line)
+        #### the final outer boundary line is the last point of the first matched upper line to the last point of the first trailing edge upper potential line
+        line = matched_upper_lines[0][-1], trailing_edge_upper_potential_lines[0][-1]
+        outer_boundary_lines.append(line)  # this is the line from the last point of the first matched upper line to the last point of the first trailing edge upper potential line
+        # now make outer boundary lines only have the index column (delete the x and y columns)
+        outer_boundary_lines = [(int(line[0][2]), int(line[1][2])) for line in outer_boundary_lines]
+        # for i in range(len(outer_boundary_lines)):
+            # print("outer boundary line ", i, ":", outer_boundary_lines[i])
+
+        #### now combine the points of the entire mesh into a numpy array and sort them by their index column
+        unshifted_xy_points_of_entire_mesh = np.array(unshifted_xy_points_of_entire_mesh)  # convert to numpy array
+        #### now re-order the points according to their third index (the index column) to ensure they are in the correct order from zero to N 
+        unshifted_xy_points_of_entire_mesh = unshifted_xy_points_of_entire_mesh[unshifted_xy_points_of_entire_mesh[:, 2].argsort()]  # sort by the third column (index column)
+        #### now shift the points using mesh.shift_xy_points on the first two columns of the entire unshifted_xy_points_of_entire_mesh array
+        shifted_xy_points_of_entire_mesh = mesh.shift_xy_points(unshifted_xy_points_of_entire_mesh[:, :2])  # shift the x and y points
+        mesh.calc_shifted_limits()
+        # add the index column back to the shifted points by adding an index column, and assigning the same indices as the unshifted points
+        shifted_xy_points_of_entire_mesh = np.column_stack((shifted_xy_points_of_entire_mesh,unshifted_xy_points_of_entire_mesh[:, 2]))
+        #### now combine the cells into a numpy array 
+        cells_array = np.array(cells)  # convert the list of cells to a numpy array
+        #### make the cells only have the index column (delete the x and y columns)
+        cells_array = np.array([(int(cell[0][2]), int(cell[1][2]), int(cell[2][2]), int(cell[3][2])) for cell in cells])  # convert to numpy array and keep only the index column
+
+        #### now make the inner and outer boundary lines into numpy arrays
+        inner_boundary_lines = np.array(inner_boundary_lines)  # convert the list of inner boundary lines to a numpy array
+        outer_boundary_lines = np.array(outer_boundary_lines)  # convert the list of outer boundary lines to a numpy array
+        #### now create an SU2 mesh file with the points, cells, inner boundary lines, and outer boundary lines
+        mesh.convert_grid_into_SU2_format(shifted_xy_points_of_entire_mesh, cells_array, inner_boundary_lines, outer_boundary_lines, mesh_filename=mesh.mesh_filename)
+    elif mesh.is_generate_mesh and mesh_file_already_exists:
+        print(f"Mesh file {mesh.mesh_filename} already exists. Skipping mesh generation.")
 
     if mesh.is_visualize_mesh:
-        plt.scatter(mesh.upper_coords[:, 0], mesh.upper_coords[:, 1], color='blue', label='Upper Points', s=marker_size)
-        plt.scatter(mesh.lower_coords[:, 0], mesh.lower_coords[:, 1], color='red', label='Lower Points', s=marker_size)
-        plt.scatter(upper_midline[:, 0], upper_midline[:, 1], color='black', s=marker_size)  # blue color and circle marker
-        plt.scatter(lower_midline[:, 0], lower_midline[:, 1], color='black', s=marker_size)  # red color and circle marker
-        for i in range(len(matched_upper_lines)):
-            plt.scatter(matched_upper_lines[i][:, 0], matched_upper_lines[i][:, 1], color='black', s=marker_size)
-        for j in range(len(matched_lower_lines)):
-            plt.scatter(matched_lower_lines[j][:, 0], matched_lower_lines[j][:, 1], color='black', s=marker_size)
-        plt.scatter(lower_stag_potential_forward[:, 0], lower_stag_potential_forward[:, 1], color='black', s=marker_size)  # red color and circle marker
-        plt.scatter(lower_stag_potential_aft[:, 0], lower_stag_potential_aft[:, 1], color='black', s=marker_size)  # red color and circle marker
-        plt.scatter(forward_stag_streamline[:, 0], forward_stag_streamline[:, 1], color='black', s=marker_size)  # blue color and circle marker
-        plt.scatter(aft_stag_streamline[:, 0], aft_stag_streamline[:, 1], color='black', s=marker_size)  # blue color and circle marker
-        for i in range(len(leading_edge_upper_potential_lines)):
-            plt.scatter(leading_edge_upper_potential_lines[i][:, 0], leading_edge_upper_potential_lines[i][:, 1], color='black', s=marker_size)
-        for i in range(len(trailing_edge_upper_potential_lines)):
-            plt.scatter(trailing_edge_upper_potential_lines[i][:, 0], trailing_edge_upper_potential_lines[i][:, 1], color='black', s=marker_size)
-        for i in range(len(leading_edge_lower_potential_lines)):
-            plt.scatter(leading_edge_lower_potential_lines[i][:, 0], leading_edge_lower_potential_lines[i][:, 1], color='black', s=marker_size)
-        for i in range(len(trailing_edge_lower_potential_lines)):
-            plt.scatter(trailing_edge_lower_potential_lines[i][:, 0], trailing_edge_lower_potential_lines[i][:, 1], color='black', s=marker_size)
-        for i in range(len(cells)):
-            mesh.plot_cell(cells[i], linewidth=0.5)  # plot the cells on the upper surface
-        if mesh.is_visualize_node_integers:
-            for i in range(len(mesh.upper_coords)):
-                plt.text(mesh.upper_coords[i, 0] + 0.05, mesh.upper_coords[i, 1] - 0.05, str(int(mesh.upper_coords[i, 2])), fontsize=8, color='black')
-            for j in range(len(mesh.lower_coords)):
-                plt.text(mesh.lower_coords[j, 0] + 0.05, mesh.lower_coords[j, 1] - 0.05, str(int(mesh.lower_coords[j, 2])), fontsize=8, color='black')
-            for i in range(len(forward_stag_streamline)):
-                plt.text(forward_stag_streamline[i, 0] + 0.05, forward_stag_streamline[i, 1] - 0.05, str(int(forward_stag_streamline[i, 2])), fontsize=8, color='black')
-            for j in range(len(aft_stag_streamline)):
-                plt.text(aft_stag_streamline[j, 0] + 0.05, aft_stag_streamline[j, 1] - 0.05, str(int(aft_stag_streamline[j, 2])), fontsize=8, color='black')
-            for line in matched_upper_lines:
-                    for k in range(line.shape[0]):
-                        plt.text(line[k, 0] + 0.05, line[k, 1] - 0.05, str(int(line[k, 2])), fontsize=8, color='black')
-            for line in matched_lower_lines:
-                for k in range(line.shape[0]):
-                    plt.text(line[k, 0] + 0.05, line[k, 1] - 0.05, str(int(line[k, 2])), fontsize=8, color='black')
-            # lower stagnation potential lines
-            for i in range(len(lower_stag_potential_forward)):
-                plt.text(lower_stag_potential_forward[i, 0] + 0.05, lower_stag_potential_forward[i, 1] - 0.05, str(int(lower_stag_potential_forward[i, 2])), fontsize=8, color='black')
-            for j in range(len(lower_stag_potential_aft)):
-                plt.text(lower_stag_potential_aft[j, 0] + 0.05, lower_stag_potential_aft[j, 1] - 0.05, str(int(lower_stag_potential_aft[j, 2])), fontsize=8, color='black')
-            # leading_edge_upper_potential_lines
-            for i in range(len(leading_edge_upper_potential_lines)):
-                for k in range(leading_edge_upper_potential_lines[i].shape[0]):
-                    plt.text(leading_edge_upper_potential_lines[i][k, 0] + 0.05, leading_edge_upper_potential_lines[i][k, 1] - 0.05, str(int(leading_edge_upper_potential_lines[i][k, 2])), fontsize=8, color='black')
-            # trailing_edge_upper_potential_lines
-            for i in range(len(trailing_edge_upper_potential_lines)):
-                for k in range(trailing_edge_upper_potential_lines[i].shape[0]):
-                    plt.text(trailing_edge_upper_potential_lines[i][k, 0] + 0.05, trailing_edge_upper_potential_lines[i][k, 1] - 0.05, str(int(trailing_edge_upper_potential_lines[i][k, 2])), fontsize=8, color='black')
-            # leading_edge_lower_potential_lines
-            for i in range(len(leading_edge_lower_potential_lines)):
-                for k in range(leading_edge_lower_potential_lines[i].shape[0]):
-                    plt.text(leading_edge_lower_potential_lines[i][k, 0] + 0.05, leading_edge_lower_potential_lines[i][k, 1] - 0.05, str(int(leading_edge_lower_potential_lines[i][k, 2])), fontsize=8, color='black')
-            # trailing_edge_lower_potential_lines
-            for i in range(len(trailing_edge_lower_potential_lines)):
-                for k in range(trailing_edge_lower_potential_lines[i].shape[0]):
-                    plt.text(trailing_edge_lower_potential_lines[i][k, 0] + 0.05, trailing_edge_lower_potential_lines[i][k, 1] - 0.05, str(int(trailing_edge_lower_potential_lines[i][k, 2])), fontsize=8, color='black')
-
-
-        plt.show()
-
-        
-
-    # n_upper   = len(mesh.upper_coords)          # len(upper) + 1 cells on upper side
-    # n_lower   = len(mesh.lower_coords)          # len(lower) + 3 cells on lower side
-    # n_cells   = n_upper + n_lower + 4           # total cells (derived from your loops)
-    # n_coords  = mesh.upper_coords.shape[1]      # 2 or 3 depending on your mesh
-
-    # cells = np.empty((n_cells, 4, n_coords), dtype=mesh.upper_coords.dtype)
-
-    # k = 0  # running index -------------------------------------------------
-    # cells[k] = np.array([mesh.upper_coords[0],
-    #                         aft_stag_streamline[0],
-    #                         trailing_edge_upper_potential_lines[0][0],
-    #                         matched_upper_lines[0][0]])
-    # k += 1
-
-    # for i in range(1, len(mesh.upper_coords)):
-    #     cells[k] = np.array([mesh.upper_coords[i],
-    #                             mesh.upper_coords[i-1],
-    #                             matched_upper_lines[i-1][0],
-    #                             matched_upper_lines[i][0]])
-    #     k += 1
-
-    # cells[k] = np.array([forward_stag_streamline[0],
-    #                         mesh.upper_coords[-1],
-    #                         matched_upper_lines[-1][0],
-    #                         leading_edge_upper_potential_lines[0][0]])
-    # k += 1
-
-    # cells[k] = np.array([leading_edge_lower_potential_lines[0][0],
-    #                         lower_stag_potential_forward[0],
-    #                         mesh.upper_coords[-1],
-    #                         forward_stag_streamline[0]])
-    # k += 1
-
-    # cells[k] = np.array([lower_stag_potential_forward[0],
-    #                         matched_lower_lines[0][0],
-    #                         mesh.lower_coords[0],
-    #                         mesh.upper_coords[-1]])
-    # k += 1
-
-    # for i in range(1, len(mesh.lower_coords)):
-    #     cells[k] = np.array([matched_lower_lines[i-1][0],
-    #                             matched_lower_lines[i][0],
-    #                             mesh.lower_coords[i],
-    #                             mesh.lower_coords[i-1]])
-    #     k += 1
-
-    # cells[k] = np.array([matched_lower_lines[-1][0],
-    #                         lower_stag_potential_aft[0],
-    #                         mesh.upper_coords[0],
-    #                         mesh.lower_coords[-1]])
-    # k += 1
-
-    # cells[k] = np.array([lower_stag_potential_aft[0],
-    #                         trailing_edge_lower_potential_lines[0][0],
-    #                         aft_stag_streamline[0],
-    #                         mesh.upper_coords[0]])
-    # # k += 1  # (optional)
-
-    # # --------------------------------------------------------------------
-    # for i in range(len(cells)):
-    #     mesh.plot_cell(cells[i], linewidth=0.5)
+        import su2_viewer # type: ignore
+        nodes, elements, boundaries = su2_viewer.read_su2(mesh.mesh_filename)
+        su2_viewer.plot_su2_mesh(nodes, elements, boundaries)

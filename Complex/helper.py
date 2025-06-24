@@ -41,19 +41,10 @@ def compute_arc_length(points: np.ndarray) -> float:
     Returns:
         Total arc length as a float.
     """
-    # if points.ndim != 2:
-        # raise ValueError("Input must be a 2D array with shape (N, D), where D=2 or D=3.")
-    # if points.shape[1] not in [2, 3]:
-    #     raise ValueError("Each point must be 2D or 3D (i.e., shape (N, 2) or (N, 3)).")
-    # if points.shape[0] < 2:
-        # return 0.0  # Not enough points to define a path
-
     # Compute differences between consecutive points
     deltas = np.diff(points, axis=0)
-
     # Compute Euclidean distances between consecutive points
     segment_lengths = np.linalg.norm(deltas, axis=1)
-
     # Sum to get total arc length
     return np.sum(segment_lengths)
 
