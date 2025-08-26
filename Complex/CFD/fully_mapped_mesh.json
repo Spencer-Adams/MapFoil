@@ -1,0 +1,20 @@
+{
+    "mesh" : {
+        "is_generate_mesh" : true,
+        "is_visualize_mesh" : true,
+        "is_visualize_node_integers" : false,
+        "is_export_mesh" : true,
+        "mesh_filename" : "/txt_files/mesh_files/full_mesh/Testing_mesh.txt",
+        "cylinder_radius" : 1.0,
+        "shape_parameter_D" : 1.0,
+        "zeta_0" : [-0.09, 0.0],
+        "surface_nodes" : 10,
+        "radial_nodes" : 10,
+        "radial_distance" : 10.0,
+        "radial_growth" : 1.1
+    },
+    "operating" : {
+        "freestream_velocity" : 10.0,
+        "angle_of_attack[deg]" : 5.0
+    }
+}

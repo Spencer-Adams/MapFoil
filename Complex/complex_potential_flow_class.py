@@ -37,6 +37,9 @@ class potential_flow_object:
                 self.z_leading_edge = self.zeta_to_z(self.zeta_leading_intercept)
                 self.z_trailing_edge = self.zeta_to_z(self.zeta_trailing_intercept)
 
+
+
+
     def surface_tangent(self, x_coord: float): # A3
         """
         Calculate the unit surface tangent vectors (upper and lower) at a given x-coordinate.
@@ -220,7 +223,7 @@ class potential_flow_object:
     
     def plot_geometry(self): # A2 on project
         """This function plots the geometry in question"""
-        plt.scatter(self.full_z_surface[:,0], self.full_z_surface[:,1], color = "black", label = "J-Cyl", s=0.5) 
+        plt.plot(self.full_z_surface[:,0], self.full_z_surface[:,1], color = "black", label = "J-Cyl")#, s=0.5) 
         plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
         plt.ylim(self.plot_x_lower_lim, self.plot_x_upper_lim)
 

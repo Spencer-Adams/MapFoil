@@ -14,6 +14,7 @@ from io import BytesIO
 from tqdm import tqdm # type: ignore
 # Helper functions below
 
+
 def parse_dictionary_or_return_default(dictionary, keys, default):
     """Safely get nested dictionary values. It makes it so that if a json key is not found, it returns a default value instead of throwing an error."""
     for key in keys:
@@ -296,12 +297,12 @@ def newtons_method(func, x0, r_values=np.array([0.0]), theta_values=np.array([0.
 
     raise ValueError("Newton's method did not converge.")
 
-def polyfit(func, r_values, gamma_vals, order_of_polynomial, is_plot, xlabel, ylabel, plot_title, D):
+def polyfit(func, r_values, theta_values, gamma_vals, order_of_polynomial, is_plot, xlabel, ylabel, plot_title, D):
     time_1 = time.time()
     # print("length of gamma_vals", len(gamma_vals))
     
     # Evaluate function at all gamma values
-    appellian_vals = np.array([[gamma, func(gamma, r_values, D)] for gamma in gamma_vals])
+    appellian_vals = np.array([[gamma, func(gamma, r_values, theta_values)] for gamma in gamma_vals])
 
     # Fit a polynomial of specified order
     coeffs = np.polyfit(appellian_vals[:, 0], appellian_vals[:, 1], order_of_polynomial)
@@ -330,11 +331,16 @@ def polyfit(func, r_values, gamma_vals, order_of_polynomial, is_plot, xlabel, yl
         # print("Case: All real distinct roots — evaluating all to find the minimum.")
         selected_extrema = real_extrema
     else:
+        print("\n\n\n")
+        print("coeffs:", coeffs)
+        print("derivative_coeffs:", derivative_coeffs)
+        print("extrema!", extrema)
+        print("\n\n\n")
         raise ValueError("Unexpected root configuration in polynomial derivative.")
     # print(f"Selected extrema: {selected_extrema}")
     # Evaluate the true function and polynomial at extrema
     # print("length of selected extrema", len(selected_extrema))
-    func_vals = np.array([func(x, r_values,  D) for x in selected_extrema])
+    func_vals = np.array([func(x, r_values, theta_values) for x in selected_extrema])
     poly_vals = np.array([np.polyval(coeffs, x) for x in selected_extrema])
 
     # for i, (f_val, p_val, x_val) in enumerate(zip(func_vals, poly_vals, selected_extrema)):
@@ -481,63 +487,199 @@ def create_animation_from_all_figs_in_folder(folder, output_filename):
     # Clean up the images
     for filename in image_filenames:
         os.remove(filename)
+
+def riemann_integration(r_values, theta_values, function: callable):
+    r0, r1 = r_values
+    theta0, theta1 = theta_values
+    dtheta = theta1 - theta0
+    if dtheta <= 0:
+        dtheta += 2 * np.pi
+    if r0 == r1:  # 1D
+        f0 = function([r0, theta0])
+        return f0 * r0 * dtheta
+    else: 
+        dr = r1 - r0
+        f = function([r0, theta0])
+        return f * r0 * dr * dtheta
     
-# def create_animation_from_all_figs_in_folder_mp4(folder, output_filename):
-#     """
-#     Create an MP4 animation from all .png figures in a specified folder.
+def trapezoidal_integration(r_values, theta_values, function: callable):
+    r0, r1 = r_values
+    theta0, theta1 = theta_values
+    dtheta = theta1 - theta0
+    if dtheta <= 0:
+        dtheta += 2 * np.pi
+    if r0 == r1:  # 1D
+        f0 = function([r0, theta0])
+        f1 = function([r0, theta1])
+        return 0.5 * (f0 + f1) * r0 * dtheta
+    else:  # 2D with midpoints
+        dr = r1 - r0
+        r_mid = 0.5 * (r0 + r1)
+        theta_mid = 0.5 * (theta0 + theta1)
+        # Corner evaluations
+        f00 = function([r0, theta0]) * r0
+        f01 = function([r0, theta1]) * r0
+        f10 = function([r1, theta0]) * r1
+        f11 = function([r1, theta1]) * r1
+        fmm = function([r_mid, theta_mid]) * r_mid
+        # Average with midpoint
+        avg = (f00 + f01 + f10 + f11 + 4 * fmm) / 8
+        return avg * dr * dtheta
+        
+def simpson_13_integration(r_values, theta_values, function: callable):
+    """Simpson's 1/3 rule for 1D or single 2D cell in polar coords."""
+    r0, r1 = r_values
+    theta0, theta1 = theta_values
+    # Ensure positive theta difference
+    dtheta = theta1 - theta0
+    if dtheta <= 0:
+        dtheta += 2 * np.pi
+    if r0 == r1:
+        # 1D case: integrate over theta at fixed r
+        theta_mid = 0.5 * (theta0 + theta1)
+        f0 = function([r0, theta0])
+        f1 = function([r0, theta_mid])
+        f2 = function([r0, theta1])
+        return (f0 + 4*f1 + f2) * r0 * dtheta / 6
+    else:
+        # 2D case
+        dr = r1 - r0
+        r_mid = 0.5 * (r0 + r1)
+        theta_mid = 0.5 * (theta0 + theta1)
+        f00 = function([r0, theta0]) * r0
+        f01 = function([r0, theta1]) * r0
+        f10 = function([r1, theta0]) * r1
+        f11 = function([r1, theta1]) * r1
+        fmm = function([r_mid, theta_mid]) * r_mid
+        f0m = function([r0, theta_mid]) * r0
+        f1m = function([r1, theta_mid]) * r1
+        fm0 = function([r_mid, theta0]) * r_mid
+        fm1 = function([r_mid, theta1]) * r_mid
+        return (f00 + f01 + f10 + f11 + 4*fmm + 2*(f0m + f1m + fm0 + fm1)) * dr * dtheta / 36
 
-#     Parameters:
-#     - folder: str, path to the folder containing the .png figures.
-#     - output_filename: str, path to save the animation (should end in .mp4).
-#     """
-#     fig, ax = plt.subplots(figsize=(10, 8))
-#     image_filenames = []
+def example_polar_function(rtuple):
+    """Example polar function for testing."""
+    # Example: r * cos(theta) + D
+    r, theta = rtuple
+    return r * np.cos(theta)
 
-#     # Find all .png files that end with a number
-#     for filename in os.listdir(folder):
-#         if filename.endswith(".png") and filename[-5].isdigit():
-#             image_filenames.append(os.path.join(folder, filename))
+def analytic_integration_in_theta_of_example_polar_function(r_values, theta_values):
+    """Analytic integration of the example polar function."""
+    r0 = r_values[0]
+    theta0, theta1 = theta_values[0], theta_values[-1]
+    if r0 == 0:
+        raise ValueError("r_values must not contain zero to avoid division by zero in the integration.")
+    # Integral of r^2 * cos(theta) dtheta from theta0 to theta1
+    integral = r0**2*(np.sin(theta1) - np.sin(theta0)) 
+    return integral 
 
-#     # Sort the filenames by numeric suffix
-#     image_filenames.sort(key=lambda x: int(x.split("__")[-1].split(".")[0]))
+def analytic_integration_in_r_and_theta_example_function(r_values, theta_values):
+    r0, r1 = r_values[0], r_values[-1]
+    theta0, theta1 = theta_values[0], theta_values[-1]
+    return ((r1**3/3)-(r0**3/3))*(np.sin(theta1)-np.sin(theta0))
 
-#     png_images = [plt.imread(img_file) for img_file in image_filenames]
-
-#     def update_frame(frame_idx):
-#         ax.clear()
-#         ax.imshow(png_images[frame_idx])
-#         ax.axis("off")
-
-#     interval = 125  # milliseconds (1/8 second per frame)
-#     fps = 1000 / interval
-
-#     ani = animation.FuncAnimation(
-#         fig, update_frame, frames=len(png_images), interval=interval
-#     )
-
-#     # Save the animation as MP4 using ffmpeg
-#     Writer = animation.writers['ffmpeg']
-#     writer = Writer(fps=fps, metadata=dict(artist='AutoGen'), bitrate=1800)
-
-#     ani.save(output_filename, writer=writer)
-#     print("MP4 animation created successfully!")
-
-#     # Optional: delete input images
-#     # for filename in image_filenames:
-#     #     os.remove(filename)
+def single_romberg_integration(integral_low, integral_high):
+    """Takes the two fidelities of integration to make a better estimate"""
+    return 4/3 * integral_high - 1/3 * integral_low
 
 if __name__ == "__main__":
-    combine_two_plots("figures/zeta_-0.25_D_sweep_alpha_5.png", "figures/zeta_-0.25_D_0_alpha_5.png", "combined_plot.svg")
-    # Create an animation
-    # fig, ax = plt.subplots(figsize=(10, 8))
-    # print("Creating animation...")
-    # ani = animation.FuncAnimation(fig, update_frame, frames=len(image_filenames), interval=100) # fig is the figure, update_frame is the function to update the frame, frames is the number of frames, interval is the time between frames in milliseconds
+    # combine_two_plots("figures/zeta_-0.25_D_sweep_alpha_5.png", "figures/zeta_-0.25_D_0_alpha_5.png", "combined_plot.svg")
+    theta0 = np.pi/4 
+    theta1 = 3*np.pi/8
+    r0 = 1.6
+    r1 = 1.8
+    # split up the interval between theta0 and theta1 into N intervals, and add the trapezoidal integration of the example polar function over that interval
+    N = 111
+    theta_values = np.linspace(theta0, theta1, N)
+    r_values = np.array([r0, r1])
+    total_riemann_integral = 0.0
+    total_trapezoidal_integral = 0.0
+    total_simpson_integral = 0.0
+    total_romberg_integral = 0.0
+    if r0 == r1:
+        print("Calculating trapezoidal integrals for each subinterval...")
+        analytic_integral = analytic_integration_in_theta_of_example_polar_function(r_values=np.array([r0, r1]),theta_values=np.array([theta0, theta1]))
+        for i in tqdm(range(len(theta_values) - 1), desc = "Calculating thetas"):
+            theta0 = theta_values[i]
+            theta1 = theta_values[i + 1]
+            thetamid = (theta0+theta1)/2
+            refined_trapezoidal = 0.0
+            thetas_unrefined = np.array([theta0, theta1])
+            thetas_refined = np.array([theta0,thetamid,theta1])
+            riemann_integral = riemann_integration(r_values, theta_values=thetas_unrefined, function = example_polar_function)
+            trapezoidal_integral = trapezoidal_integration(r_values=r_values, theta_values=thetas_unrefined, function=example_polar_function)
+            for j in range(len(thetas_refined)-1):
+                refined_trapezoidal += trapezoidal_integration(r_values=r_values,theta_values = np.array([thetas_refined[j], thetas_refined[j+1]]), function=example_polar_function)
+            romberg_integral = single_romberg_integration(trapezoidal_integral, refined_trapezoidal)
+            simpson_integral = simpson_13_integration(r_values = r_values, theta_values=np.array([theta0, theta1]), function = example_polar_function)
+            total_riemann_integral += riemann_integral
+            total_trapezoidal_integral += trapezoidal_integral
+            total_simpson_integral += simpson_integral 
+            total_romberg_integral += romberg_integral
+        percent_error_riemann = abs(total_riemann_integral-analytic_integral)/(analytic_integral)*100
+        percent_error_trapezoidal = abs(total_trapezoidal_integral-analytic_integral)/(analytic_integral)*100
+        percent_error_simpson13 = abs(total_simpson_integral-analytic_integral)/(analytic_integral)*100
+        percent_error_romberg = abs(total_romberg_integral-analytic_integral)/(analytic_integral)*100
+        print("Analytic integration result:   ", analytic_integral)
+        print("Riemann integration result:    ", total_riemann_integral)
+        print("Riemann Percent Difference:    ", percent_error_riemann)
+        print("Trapezoidal integration result:", total_trapezoidal_integral)
+        print("Trapezoidal Percent Difference:", percent_error_trapezoidal)
+        print("Simpson 1/3 integration result:", total_simpson_integral)
+        print("Simpson 1/3 Percent Difference:", percent_error_simpson13)
+        print("Romberg Integration Result:    ", total_romberg_integral)
+        print("Romberg Percent Difference:    ", percent_error_romberg)
+    else:
+        analytic_integral = analytic_integration_in_r_and_theta_example_function(r_values=np.array([r0, r1]),theta_values=np.array([theta0, theta1]))
+        r_values_grid = np.linspace(r0, r1, N)
+        total_riemann_integral = 0.0
+        total_trapezoidal_integral = 0.0
+        total_simpson_integral = 0.0
+        total_romberg_integral = 0.0
+        for i in tqdm(range(len(r_values_grid) - 1), desc="r values"):
+            r0_cell = r_values_grid[i]
+            r1_cell = r_values_grid[i + 1]
+            for j in range(len(theta_values) - 1):
+                theta0_cell = theta_values[j]
+                theta1_cell = theta_values[j + 1]
+                thetamid = 0.5 * (theta0_cell + theta1_cell)
+                rmid = 0.5 * (r0_cell + r1_cell)
+                # Unrefined and refined theta intervals for Romberg
+                thetas_unrefined = np.array([theta0_cell, theta1_cell])
+                thetas_refined = np.array([theta0_cell, thetamid, theta1_cell])
+                r_values_unrefined = np.array([r0_cell, r1_cell])
+                r_values_refined = np.array([r0_cell, rmid, r1_cell])
+                refined_trapezoidal = 0.0
+                for k in range(len(r_values_refined) - 1):
+                    for M in range(len(thetas_refined)-1):
+                        refined_trapezoidal += trapezoidal_integration(r_values=np.array([r_values_refined[k], r_values_refined[k+1]]),theta_values=np.array([thetas_refined[M], thetas_refined[M + 1]]),function=example_polar_function)
+                # Compute integrations on this 2D cell
+                riemann = riemann_integration(r_values=np.array([r0_cell, r1_cell]),theta_values=thetas_unrefined,function=example_polar_function)
+                trapezoidal = trapezoidal_integration(r_values=np.array([r0_cell, r1_cell]),theta_values=thetas_unrefined,function=example_polar_function)
+                simpson = simpson_13_integration(r_values=np.array([r0_cell, r1_cell]),theta_values=thetas_unrefined,function=example_polar_function)
+                romberg = single_romberg_integration(trapezoidal, refined_trapezoidal)
+                total_riemann_integral += riemann
+                total_trapezoidal_integral += trapezoidal
+                total_simpson_integral += simpson
+                total_romberg_integral += romberg
+        # Compute percent errors
+        percent_error_riemann = abs(total_riemann_integral - analytic_integral) / abs(analytic_integral) * 100
+        percent_error_trapezoidal = abs(total_trapezoidal_integral - analytic_integral) / abs(analytic_integral) * 100
+        percent_error_simpson13 = abs(total_simpson_integral - analytic_integral) / abs(analytic_integral) * 100
+        percent_error_romberg = abs(total_romberg_integral - analytic_integral) / abs(analytic_integral) * 100
+        # Output results
+        print("Analytic integration result:   ", analytic_integral)
+        print("Riemann integration result:    ", total_riemann_integral)
+        print("Riemann Percent Difference:    ", percent_error_riemann)
+        print("Trapezoidal integration result:", total_trapezoidal_integral)
+        print("Trapezoidal Percent Difference:", percent_error_trapezoidal)
+        print("Simpson 1/3 integration result:", total_simpson_integral)
+        print("Simpson 1/3 Percent Difference:", percent_error_simpson13)
+        print("Romberg Integration Result:    ", total_romberg_integral)
+        print("Romberg Percent Difference:    ", percent_error_romberg)
 
-    # # Save the animation as a video or GIF
-    # ani.save("Distributions_Animation.gif", writer="pillow", fps=5)  # Save as a GIF
-    # print("Animation created successfully!")
 
-    # # clean up the images 
-    # for filename in image_filenames:
-    #     os.remove(filename)
+        
+
+
 
