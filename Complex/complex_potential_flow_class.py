@@ -223,7 +223,18 @@ class potential_flow_object:
     
     def plot_geometry(self): # A2 on project
         """This function plots the geometry in question"""
-        plt.plot(self.full_z_surface[:,0], self.full_z_surface[:,1], color = "black", label = "J-Cyl")#, s=0.5) 
+        all_linestyles = [
+            "solid",            # solid
+            (0, (5, 5)),        # dashed
+            "dashdot",          # dash-dot (standard Matplotlib style)
+            (0, (3, 5, 1, 5)),  # dash-dot with spacing
+            (0, (1, 5)),        # dotted (sparse)
+            (0, (1, 3)),        # dotted (denser)
+            (0, (1, 1))         # very fine dotted
+        ]
+        line_style = all_linestyles[0]
+        weight = 1.0
+        plt.plot(self.full_z_surface[:,0], self.full_z_surface[:,1], color = "black", label = "J-Cyl", linestyle=line_style, linewidth=weight)#, s=0.5) 
         plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
         plt.ylim(self.plot_x_lower_lim, self.plot_x_upper_lim)
 

@@ -10,10 +10,8 @@ plt.rcParams['lines.linewidth'] = 1.0 # 1.0
 plt.rcParams["xtick.minor.visible"] = True 
 plt.rcParams["ytick.minor.visible"] = True
 plt.rcParams["xtick.direction"] = plt.rcParams["ytick.direction"] = "in"
-plt.rcParams["xtick.bottom"] = True
-plt.rcParams["xtick.top"]    = False
-plt.rcParams["ytick.left"]   = True
-plt.rcParams["ytick.right"]  = False
+plt.rcParams["xtick.bottom"] = plt.rcParams["xtick.top"]= True 
+plt.rcParams["ytick.left"] = plt.rcParams["ytick.right"] =True
 plt.rcParams["xtick.major.width"] = plt.rcParams["ytick.major.width"] = 0.75
 plt.rcParams["xtick.minor.width"] = plt.rcParams["ytick.minor.width"] = 0.75
 plt.rcParams["xtick.major.size"] = plt.rcParams["ytick.major.size"] = 5.0
@@ -35,11 +33,11 @@ all_linestyles = [
 ]
 color = ["black"]
 
-#### First Plot (Numerical vs Analytic line integral Grid Conv Comparison at D = 0.1 without camber)####### 
+# #### First Plot (Numerical vs Analytic line integral Grid Conv Comparison at D = 0.1 without camber)####### 
 # file_location = "Grid_conv/figures/integral_line/base_plots_num_vs_analytic"
 # x_is_log_scale = True
 # y_is_log_scale = True
-# labels = ["Analytical", "Numerical"] # labels for the numerical vs analytic first plot
+# labels = ["Eq.", "Eq."] # labels for the numerical vs analytic first plot (Latex to put the Equation numbers in for reals)
 # is_legend = True
 # is_legend_below_fig = False
 # bbox_to_anchor = (0.5, -0.5)
@@ -49,9 +47,10 @@ color = ["black"]
 # x_limit = (10, 1e6)
 # x_ticks = [1e1, 1e2, 1e3, 1e4, 1e5, 1e6]
 # x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"]
-# y_limit = (1e-14, 100)
-# y_ticks = [1e-14, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1e0, 1e2]
-# y_tick_labels = ["$10^{-14}$", "$10^{-12}$", "$10^{-10}$", "$10^{-8}$", "$10^{-6}$", "$10^{-4}$", "$10^{-2}$", "$10^{0}$", "$10^{2}$"]
+# is_move_x_tick_label_right = False
+# y_limit = (1e-16, 100)
+# y_ticks = [1e-16, 1e-14, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1e0, 1e2]
+# y_tick_labels = ["$10^{-16}$", "$10^{-14}$", "$10^{-12}$", "$10^{-10}$", "$10^{-8}$", "$10^{-6}$", "$10^{-4}$", "$10^{-2}$", "$10^{0}$", "$10^{2}$"]
 # is_show_plot = False
 # is_save_plot = True
 # plot_name = "D_0.1_analytic_vs_numerical_line_integral_comparison"
@@ -59,11 +58,38 @@ color = ["black"]
 # second_column_for_plotting = 1
 # number_of_rows_to_skip = 2
 
-##### Second Plot (Analytic line integral Grid Conv of D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] without camber)####### 
+# #### Second Plot (Numerical vs Analytic line integral Grid Conv Comparison at D = 0.1 without camber)#######
+# file_location = "Grid_conv/figures/integral_line/base_plots_num_vs_analytic"
+# x_is_log_scale = True
+# y_is_log_scale = False
+# labels = ["Eq.", "Eq."] # labels for the numerical vs analytic first plot (Latex to put the Equation numbers in for reals)
+# is_legend = True
+# is_legend_below_fig = False
+# bbox_to_anchor = (0.5, -0.5)
+# x_axis_title = "Surface Points"
+# y_axis_title = "$\\hat{S}$"
+# labelpad = -1
+# x_limit = (10, 1e6)
+# x_ticks = [1e1, 1e2, 1e3, 1e4, 1e5, 1e6]
+# x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"]
+# is_move_x_tick_label_right = True
+# x_shift = 0.05
+# y_shift = -0.09
+# y_limit = (0.0, 2.0)
+# y_ticks = [0.0, 0.5,1.0,1.5,2.0]
+# y_tick_labels = ["$0.0$", "$0.5$","$1.0$","$1.5$","$2.0$"]
+# is_show_plot = False
+# is_save_plot = True
+# plot_name = "appellian_for_different_D_values"
+# first_column_for_plotting = 0
+# second_column_for_plotting = 3
+# number_of_rows_to_skip = 1
+
+##### Third Plot (Analytic line integral Grid Conv of D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] without camber)####### 
 # file_location = "Grid_conv/figures/integral_line/uncambered"
 # x_is_log_scale = True
 # y_is_log_scale = True
-# labels = ["D = 0.001", "D = 0.01", "D = 0.1", "D = 0.2", "D = 0.4", "D = 0.8", "D = 1.0"] # labels for the different D values second plot
+# labels = ["$D$ = 0.001", "$D$ = 0.01", "$D$ = 0.1", "$D$ = 0.2", "$D$ = 0.4", "$D$ = 0.8", "$D$ = 1.0"] # labels for the different D values second plot
 # is_legend = True
 # is_legend_below_fig = True
 # bbox_to_anchor = (0.5, -0.4)
@@ -84,11 +110,11 @@ color = ["black"]
 # second_column_for_plotting = 1
 # number_of_rows_to_skip = 2
 
-##### Third Plot (Analytic line integral Showing S for D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] without camber)####### 
+##### Fourth Plot (Analytic line integral Showing S for D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] without camber)####### 
 # file_location = "Grid_conv/figures/integral_line/uncambered"
 # x_is_log_scale = True
 # y_is_log_scale = False
-# labels = ["D = 0.001", "D = 0.01", "D = 0.1", "D = 0.2", "D = 0.4", "D = 0.8", "D = 1.0"] # labels for the different D values second plot
+# labels = ["$D$ = 0.001", "$D$ = 0.01", "$D$ = 0.1", "$D$ = 0.2", "$D$ = 0.4", "$D$ = 0.8", "$D$ = 1.0"] # labels for the different D values second plot
 # is_legend = True
 # is_legend_below_fig = True
 # bbox_to_anchor = (0.5, -0.4)
@@ -99,6 +125,8 @@ color = ["black"]
 # x_ticks = [1e1, 1e2, 1e3, 1e4, 1e5, 1e6]
 # x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"]
 # is_move_x_tick_label_right = True
+# x_shift = 0.05
+# y_shift = -0.28
 # y_limit = (0.0, 6.0)
 # y_ticks = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
 # y_tick_labels = ["$0$", "$1$", "$2$", "$3$", "$4$", "$5$", "$6$"]
@@ -109,11 +137,11 @@ color = ["black"]
 # second_column_for_plotting = 3
 # number_of_rows_to_skip = 1
 
-# # ##### Fourth Plot (Analytic line integral Grid Conv of D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] with camber)####### 
+# # ##### Fifth Plot (Analytic line integral Grid Conv of D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] with camber)####### 
 # file_location = "Grid_conv/figures/integral_line/cambered"
 # x_is_log_scale = True
 # y_is_log_scale = True
-# labels = ["D = 0.001", "D = 0.01", "D = 0.1", "D = 0.2", "D = 0.4", "D = 0.8", "D = 1.0"] # labels for the different D values second plot
+# labels = ["$D$ = 0.001", "$D$ = 0.01", "$D$ = 0.1", "$D$ = 0.2", "$D$ = 0.4", "$D$ = 0.8", "$D$ = 1.0"] # labels for the different D values second plot
 # is_legend = True
 # is_legend_below_fig = True
 # bbox_to_anchor = (0.5, -0.4)
@@ -134,31 +162,135 @@ color = ["black"]
 # second_column_for_plotting = 1
 # number_of_rows_to_skip = 2
 
-# #### Fifth Plot (Analytic line integral Showing S for D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] with camber)####### 
-file_location = "Grid_conv/figures/integral_line/cambered"
+# #### Sixth Plot (Analytic line integral Showing S for D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] with camber)####### 
+# file_location = "Grid_conv/figures/integral_line/cambered"
+# x_is_log_scale = True
+# y_is_log_scale = False
+# labels = ["$D$ = 0.001", "$D$ = 0.01", "$D$ = 0.1", "$D$ = 0.2", "$D$ = 0.4", "$D$ = 0.8", "$D$ = 1.0"] # labels for the different D values second plot
+# is_legend = True
+# is_legend_below_fig = True
+# bbox_to_anchor = (0.5, -0.4)
+# x_axis_title = "Surface Points"
+# y_axis_title = "$\\hat{S}$"
+# labelpad = -1
+# x_limit = (10, 1e6)
+# x_ticks = [1e1, 1e2, 1e3, 1e4, 1e5, 1e6]
+# x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"]
+# is_move_x_tick_label_right = True
+# x_shift = 0.05
+# y_shift = -0.28
+# is_move_first_x_tick_label_right = True
+# y_limit = (0.0, 6.0)
+# y_ticks = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+# y_tick_labels = ["$0$", "$1$", "$2$", "$3$", "$4$", "$5$", "$6$"]
+# is_show_plot = False
+# is_save_plot = True
+# plot_name = "appellian_for_different_D_values"
+# first_column_for_plotting = 0
+# second_column_for_plotting = 3
+# number_of_rows_to_skip = 1
+
+# ##### Seventh Plot (Analytic area integral on surface Grid Conv of D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] with camber)####### 
+# file_location = "Grid_conv/figures/integral_area/on_surface/uncambered"
+# x_is_log_scale = True
+# y_is_log_scale = True
+# labels = ["$D$ = 0.001", "$D$ = 0.01", "$D$ = 0.1", "$D$ = 0.2", "$D$ = 0.4", "$D$ = 0.8", "$D$ = 1.0"] # labels for the different D values second plot
+# is_legend = True
+# is_legend_below_fig = True
+# bbox_to_anchor = (0.5, -0.4)
+# x_axis_title = "Surface Points"
+# y_axis_title = "$\\varepsilon_a$"
+# labelpad = -1
+# x_limit = (10, 1e6)
+# x_ticks = [1e1, 1e2, 1e3, 1e4, 1e5, 1e6]
+# x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"]
+# is_move_x_tick_label_right = False
+# y_limit = (1e-16, 100)
+# y_ticks = [1e-16, 1e-14, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1e0, 1e2]
+# y_tick_labels = ["$10^{-16}$", "$10^{-14}$", "$10^{-12}$", "$10^{-10}$", "$10^{-8}$", "$10^{-6}$", "$10^{-4}$", "$10^{-2}$", "$10^{0}$", "$10^{2}$"]
+# is_show_plot = False
+# is_save_plot = True
+# plot_name = "Grid_conv_for_different_D_values"
+# first_column_for_plotting = 0
+# second_column_for_plotting = 1
+# number_of_rows_to_skip = 2
+
+#### Eighth Plot (Analytic area integral on surface Showing S for D = [0.001,0.01,0.1,0.2,0.4,0.8,1.0] with camber)####### 
+# file_location = "Grid_conv/figures/integral_area/on_surface/uncambered"
+# x_is_log_scale = True
+# y_is_log_scale = False
+# labels = ["$D$ = 0.001", "$D$ = 0.01", "$D$ = 0.1", "$D$ = 0.2", "$D$ = 0.4", "$D$ = 0.8", "$D$ = 1.0"] # labels for the different D values second plot
+# is_legend = True
+# is_legend_below_fig = True
+# bbox_to_anchor = (0.5, -0.4)
+# x_axis_title = "Surface Points"
+# y_axis_title = "$\\hat{S}$"
+# labelpad = -1
+# x_limit = (10, 1e6)
+# x_ticks = [1e1, 1e2, 1e3, 1e4, 1e5, 1e6]
+# x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"]
+# is_move_x_tick_label_right = True
+# x_shift = 0.05
+# y_shift = -0.28
+# y_limit = (0.0, 200.0)
+# y_ticks = [0.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0, 160.0, 180.0, 200.0]
+# y_tick_labels = ["$0.0$", "$20.0$", "$40.0$", "$60.0$", "$80.0$", "$100.0$", "$120.0$", "$140.0$", "$160.0$", "$180.0$", "$200.0$"]
+# is_show_plot = False
+# is_save_plot = True
+# plot_name = "appellian_for_different_D_values"
+# first_column_for_plotting = 0
+# second_column_for_plotting = 3
+# number_of_rows_to_skip = 1
+
+# ##### Ninth Plot (Analytic area integral Grid Conv of D = [0.1] without camber)####### 
+file_location = "Grid_conv/figures/integral_area/including_radial/uncambered"
 x_is_log_scale = True
-y_is_log_scale = False
-labels = ["D = 0.001", "D = 0.01", "D = 0.1", "D = 0.2", "D = 0.4", "D = 0.8", "D = 1.0"] # labels for the different D values second plot
+y_is_log_scale = True
+labels = ["$L$ = 5.0", "$L$ = 10.0", "$L$ = 20.0", "$L$ = 40.0", "$L$ = 80.0", "$L$ = 160.0", "$L$ = 320.0"] # labels for the different D values second plot
 is_legend = True
 is_legend_below_fig = True
 bbox_to_anchor = (0.5, -0.4)
-x_axis_title = "Surface Points"
-y_axis_title = "$\\hat{S}$"
+x_axis_title = "Radial Points"
+y_axis_title = ""
 labelpad = -1
-x_limit = (10, 1e6)
-x_ticks = [1e1, 1e2, 1e3, 1e4, 1e5, 1e6]
-x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"]
-is_move_x_tick_label_right = True
-is_move_first_x_tick_label_right = True
-y_limit = (0.0, 6.0)
-y_ticks = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-y_tick_labels = ["$0$", "$1$", "$2$", "$3$", "$4$", "$5$", "$6$"]
+x_limit = (10, 1e5)
+x_ticks = [1e1, 1e2, 1e3, 1e4, 1e5]
+x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$", "$10^5$"]#, "$10^5$", "$10^6$"]
+is_move_x_tick_label_right = False
+y_limit = (1e-8, 1e0)
+y_ticks = [1e-8, 1e-6, 1e-4, 1e-2, 1e0]#, 1e-6, 1e-4, 1e-2, 1e0, 1e2]
+y_tick_labels = ["$10^{-8}$","$10^{-6}$", "$10^{-4}$", "$10^{-2}$", "$10^{0}$"]#, "$10^{-6}$", "$10^{-4}$", "$10^{-2}$", "$10^{0}$", "$10^{2}$"]
 is_show_plot = False
 is_save_plot = True
-plot_name = "appellian_for_different_D_values"
+plot_name = "Grid_conv_for_different_D_values"
 first_column_for_plotting = 0
-second_column_for_plotting = 3
+second_column_for_plotting = 1
 number_of_rows_to_skip = 1
+
+# ##### tenth Plot (Analytic area integral growth factor comparisons for D = [0.1] without camber)####### 
+# file_location = "Grid_conv/figures/integral_area/including_radial/uncambered/growth_factor"
+# x_is_log_scale = True
+# y_is_log_scale = True
+# labels = ["$g$=1.0","$g$=1.5","$g$=2.0","$g$=2.5","$g$=3.0"] # labels for the different D values second plot
+# is_legend = True
+# is_legend_below_fig = True
+# bbox_to_anchor = (0.5, -0.4)
+# x_axis_title = "Radial Points"
+# y_axis_title = ""
+# labelpad = -1
+# x_limit = (10, 1e4)
+# x_ticks = [1e1, 1e2, 1e3, 1e4]#, 1e5, 1e6]
+# x_tick_labels = ["$10^1$", "$10^2$", "$10^3$", "$10^4$"]#, "$10^4$", "$10^5$", "$10^6$"]
+# is_move_x_tick_label_right = False
+# y_limit = (1e-6, 100)
+# y_ticks = [1e-6, 1e-4, 1e-2, 1e0, 1e2]#, 1e-6, 1e-4, 1e-2, 1e0, 1e2]
+# y_tick_labels = ["$10^{-6}$", "$10^{-4}$", "$10^{-2}$", "$10^{0}$", "$10^{2}$"]#, "$10^{-6}$", "$10^{-4}$", "$10^{-2}$", "$10^{0}$", "$10^{2}$"]
+# is_show_plot = False
+# is_save_plot = True
+# plot_name = "Grid_conv_for_different_D_values"
+# first_column_for_plotting = 0
+# second_column_for_plotting = 1
+# number_of_rows_to_skip = 1
 
 def read_file(file):
     """reads in a file and returns its content as a numpy array"""
@@ -251,7 +383,7 @@ def plot_files(file_location, first_column_for_plotting: int = 0, second_column_
             # You can adjust the y value (vertical position) as needed
             # Use the same y as the original tick label
             x, y = ticklabels[0].get_position()
-            ax.text(xticks[0] + 0.05 * (xticks[1] - xticks[0]), y-0.28, x_tick_labels[0], ha='center', va='center')
+            ax.text(xticks[0] + x_shift * (xticks[1] - xticks[0]), y+y_shift, x_tick_labels[0], ha='center', va='center')
             # move yaxis title down a bit
             ax.yaxis.label.set_position((ax.yaxis.label.get_position()[0], ax.yaxis.label.get_position()[1] + 0.05))
     if is_save_plot:

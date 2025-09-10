@@ -234,11 +234,11 @@ class cylinder(potential_flow_object):
     
     def plot_geometry_settings(self):
         # include y and x axes 
-        # plt.axhline(0, color='gray')
-        # plt.axvline(0, color='gray')
+        plt.axhline(0, color='gray')
+        plt.axvline(0, color='gray')
         plt.gca().set_aspect('equal', adjustable='box')
-        plt.xlabel("$\\xi$/$R$")
-        plt.ylabel("$\\eta$/$R$")
+        plt.xlabel("Real/$R$")
+        plt.ylabel("Imag/$R$")
         plt.gca().xaxis.labelpad = 0.001
         plt.gca().yaxis.labelpad = -10
         plt.xlim(self.plot_x_lower_lim, self.plot_x_upper_lim)
@@ -514,6 +514,32 @@ class cylinder(potential_flow_object):
         y_next = np.roll(ys, -1) 
         area = 0.5 * abs(np.sum(xs * y_next - ys * x_next))
         return area
+    
+    def quad_area_from_complex(self, z00, z01, z11, z10):
+        """
+        Area of a quadrilateral with vertices ordered around the cell:
+            z00 = (r,theta),
+            z01 = (r,theta+deltatheta),
+            z11 = (r+deltar,theta+deltatheta),
+            z10 = (r+deltar,theta).
+
+        Implements the shoelace formula:
+            A = 1/2 * | Σ (x_i * y_{i+1} - x_{i+1} * y_i) |
+        which is equivalent to summing the 2×2 determinants:
+
+            A = 1/2 * ( |x0 x1| + |x1 x2| + ... + |xn-1 x0| )
+                        y0 y1     y1 y2           yn-1 y0
+        """
+        xs = np.array([z00.real, z01.real, z11.real, z10.real])
+        ys = np.array([z00.imag, z01.imag, z11.imag, z10.imag])
+        # "next" points (x_{i+1}, y_{i+1}) with wrap-around
+        x_next = np.roll(xs, -1)
+        y_next = np.roll(ys, -1)
+        # Shoelace sum: Σ (x_i*y_{i+1} - x_{i+1}*y_i)
+        shoelace_sum = np.sum(xs * y_next - x_next * ys)
+        # Final area (absolute value ensures orientation safety)
+        area = 0.5 * abs(shoelace_sum)
+        return area
 
     def trapezoidal_integration(self, r_values, theta_values, Gamma):
         """Trapezoidal rule over full domain."""
@@ -559,12 +585,12 @@ class cylinder(potential_flow_object):
         is_area = len(r_values) > 1
         total = 0.0
         if is_area:
-            # iterate over r,θ cells
+            # iterate over r,theta cells
             for i in range(len(r_values) - 1):
                 r0, r1 = r_values[i], r_values[i + 1]
                 for j in range(len(theta_values) - 1):
                     th0, th1 = theta_values[j], theta_values[j + 1]
-                    # corners in χ → ζ → z
+                    # corners in chi → zeta → z
                     chi00 = complex(*hlp.r_theta_to_xy(r0, th0))
                     chi01 = complex(*hlp.r_theta_to_xy(r0, th1))
                     chi11 = complex(*hlp.r_theta_to_xy(r1, th1))
@@ -915,9 +941,9 @@ class cylinder(potential_flow_object):
                     result = self.appellian_acceleration_loop(Gamma, r_values, thetas, grid_conv = True)
                     if relative_error:
                         if previous_result is not None:
-                            error = abs((result - previous_result) / previous_result) * 100
+                            error = abs((result - previous_result) / previous_result) 
                     else:
-                        error = abs((result - reference_value) / reference_value) * 100
+                        error = abs((result - reference_value) / reference_value) 
                     gridpoints.append(len(r_values))
                     errors.append(error)
                     results.append(result)
@@ -925,7 +951,7 @@ class cylinder(potential_flow_object):
                     normalized_results.append(normalized_result)
                 previous_result = result
                 r_values = double_nodes_linear(r_values)
-            arr = np.column_stack((gridpoints, errors, results))
+            arr = np.column_stack((gridpoints, errors, results, normalized_results))
             time_end = time.time()
             total_time = time_end-time_start
             filename = os.path.join(output_dir,f"{method_name.lower()}_radialconv_growth_{round(self.r_growth_factor, 3)}_radial_distance_{round(self.radial_distance-self.cylinder_radius, 3)}_D_{round(self.D, 3)}"f"_zeta0_r_{round(self.zeta_center.real, 3)}"f"_zeta0_i_{round(self.zeta_center.imag, 3)}_time_{round(total_time, 3)}s_.csv")
@@ -1042,7 +1068,7 @@ class cylinder(potential_flow_object):
 
     def run_appellian_roots(self, r_vals, theta_vals, D):
         """This function runs the Appellian stuff"""
-        Gamma_vals = np.linespace(0, self.kutta_circulation, 6, endpoint=True) # if kutta circulation is 10, gamma vals will be [0, 2, 4, 6, 8, 10]
+        Gamma_vals = np.linspace(0, self.kutta_circulation, 6, endpoint=True) # if kutta circulation is 10, gamma vals will be [0, 2, 4, 6, 8, 10]
         poly_order = 4
         appellian_root, appellian_value = hlp.polyfit(self.numerically_integrate_appellian, r_vals, theta_vals, Gamma_vals, poly_order, self.is_plot_appellian, "$\\Gamma$", "S", "Appellian Function", D)
         return appellian_root, appellian_value
@@ -1228,10 +1254,8 @@ class cylinder(potential_flow_object):
         if np.isclose(total_distance, 0.0):
             print("Distance is zero, returning 0.0 for deltaD_0.")
             return 0.0
-
         if np.isclose(radial_growth, 1.0):
             return total_distance / (N - 1)
-
         # Sum of geometric series with N-1 terms (i.e., N points → N-1 intervals)
         sum_geom = (1 - radial_growth ** (N - 1)) / (1 - radial_growth)
         return total_distance / sum_geom
@@ -1323,6 +1347,86 @@ class cylinder(potential_flow_object):
         plt.close()
         print("Saved plot:", plot_name)
 
+    def grid_plots(self):
+        # Reset the plot settings
+        plt.figure()
+        self.plot_geometry_settings()
+        plt.xlabel("$\\xi$/$R$")
+        plt.ylabel("$\\eta$/$R$")
+
+        # Parameters for the polar grid
+        R = self.cylinder_radius  # Cylinder radius
+        zeta_center = self.zeta_center  # Center of the cylinder in the zeta plane
+        theta_increment = 2*np.pi / 32  # Spacing between radial lines
+
+        # Generate theta and r values
+        r_growth_factor = 1.1
+        num_r_points_start = 32
+        total_distance = 2
+        first_r_spacing = self.calc_deltaD_0(num_r_points_start, r_growth_factor, total_distance=total_distance)
+        # Compute r_values via cumulative sum of geometrically growing intervals
+        intervals = first_r_spacing * r_growth_factor ** np.arange(num_r_points_start - 1)
+        r_vals = self.cylinder_radius + np.concatenate(([0.0], np.cumsum(intervals)))
+        theta_vals = np.arange(0, 2 * np.pi, theta_increment)  # Angles for radial lines
+        print("length theta vals", len(theta_vals))
+        print("length r vals", len(r_vals))
+        # r_vals = np.arange(R, max_radius + r_increment, r_increment)  # Radii for circular lines
+
+        # Arrays to store the lines
+        radial_lines = []
+        circular_lines = []
+
+        # Create radial lines in the zeta plane
+        for theta in theta_vals:
+            line = np.array([[zeta_center.real + r * np.cos(theta), zeta_center.imag + r * np.sin(theta)] for r in np.linspace(r_vals[0], r_vals[-1], 1000)])  # Offset by zeta_center
+            radial_lines.append(line)  # Save the line
+            plt.plot(line[:, 0], line[:, 1], color='black', lw=0.6)  # Plot the radial line
+
+        # Create circular lines in the zeta plane
+        for r in r_vals:
+            line = np.array([[zeta_center.real + r * np.cos(theta), zeta_center.imag + r * np.sin(theta)] for theta in np.linspace(0, 2 * np.pi, 1000)])  # Offset by zeta_center
+            circular_lines.append(line)  # Save the line
+            plt.plot(line[:, 0], line[:, 1], color='black', lw=0.6)  # Plot the circular line
+
+        # plt.savefig("figures/circle_grid_" + str(cyl.zeta_center.real) + "_" + str(cyl.zeta_center.imag) + "_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".svg", dpi=300, bbox_inches=None, pad_inches=0)
+
+        # Transform the grid to the z-plane
+        plt.figure()
+        self.plot_geometry_settings()
+        plt.xlabel("$x$/$R$")
+        plt.ylabel("$y$/$R$")
+        # Arrays to store the transformed lines
+        transformed_radial_lines = []
+        transformed_circular_lines = []
+
+        # Transform radial lines to the z-plane
+        for line in radial_lines:
+            transformed_line = []
+            for point in line:
+                zeta = point[0] + 1j * point[1]  # Convert to complex zeta
+                z = self.zeta_to_z(zeta, self.epsilon)  # Transform to z-plane
+                transformed_line.append([z.real, z.imag])  # Store the transformed point
+            transformed_line = np.array(transformed_line)  # Convert to numpy array
+            transformed_radial_lines.append(transformed_line)  # Save the transformed line
+            plt.plot(transformed_line[:, 0], transformed_line[:, 1], color='black', lw=0.6)  # Plot the transformed radial line
+
+        # Transform circular lines to the z-plane
+        for line in circular_lines:
+            transformed_line = []
+            for point in line:
+                zeta = point[0] + 1j * point[1]  # Convert to complex zeta
+                z = self.zeta_to_z(zeta, self.epsilon)  # Transform to z-plane
+                transformed_line.append([z.real, z.imag])  # Store the transformed point
+            transformed_line = np.array(transformed_line)  # Convert to numpy array
+            transformed_circular_lines.append(transformed_line)  # Save the transformed line
+            plt.plot(transformed_line[:, 0], transformed_line[:, 1], color='black', lw=0.6)  # Plot the transformed circular line
+
+        # Plot the geometry of the shape in the z-plane
+        # plt.plot(self.upper_coords[:, 0], self.upper_coords[:, 1], color='black')
+        # plt.plot(self.lower_coords[:, 0], self.lower_coords[:, 1], color='black')
+        # plt.savefig("figures/airfoil_grid_" + str(cyl.zeta_center.real) + "_" + str(cyl.zeta_center.imag) + "_alpha_" + str(round(cyl.angle_of_attack*180/np.pi, 1)) + ".svg", dpi=300, bbox_inches=None, pad_inches=0)
+        plt.show()
+
 
 def double_nodes_periodic(theta_vals: np.ndarray) -> np.ndarray:
     """
@@ -1361,8 +1465,8 @@ if __name__ == "__main__":
     plt.rcParams["xtick.minor.visible"] = True 
     plt.rcParams["ytick.minor.visible"] = True
     plt.rcParams["xtick.direction"] = plt.rcParams["ytick.direction"] = "in"
-    plt.rcParams["xtick.bottom"] = plt.rcParams["xtick.top"] = True
-    plt.rcParams["ytick.left"] = plt.rcParams["ytick.right"] = True
+    plt.rcParams["xtick.bottom"] = plt.rcParams["xtick.top"]= True 
+    plt.rcParams["ytick.left"] = plt.rcParams["ytick.right"] =True
     plt.rcParams["xtick.major.width"] = plt.rcParams["ytick.major.width"] = 0.75
     plt.rcParams["xtick.minor.width"] = plt.rcParams["ytick.minor.width"] = 0.75
     plt.rcParams["xtick.major.size"] = plt.rcParams["ytick.major.size"] = 5.0
@@ -1392,6 +1496,8 @@ if __name__ == "__main__":
         Gamma = cyl.calc_circulation_J_airfoil()  # calculate the circulation of the airfoil
         time_start = time.time()
         appellian_root, appellian_value = cyl.run_appellian_roots(r_values, theta_values, cyl.D) # calculate the minimum Appellian value
+        if cyl.is_plot_streamlines:
+            cyl.circulation = appellian_root
         print("Gamma Appellian: ", appellian_root)
         print("Appellian value", appellian_value)
     if cyl.is_compute_appellian:
@@ -1403,6 +1509,7 @@ if __name__ == "__main__":
         time_start = time.time()
         appellian_value = cyl.appellian_acceleration_loop(Gamma, r_values, theta_values)
         time_end = time.time()
+
         print("D: ", cyl.D)
         print("Gamma_used_to_compute_Appellian: ", Gamma)
         print("num_r_vals: ", len(r_values))
@@ -1463,7 +1570,7 @@ if __name__ == "__main__":
         plt.close()
     cyl.get_full_geometry_zeta(number_of_points=cyl.output_points, theta_start = 2*np.pi, theta_half = np.pi, theta_end = 0.0)
     cyl.plot_geometry_settings()
-    # cyl.plot_geometry_zeta() ####
+    cyl.plot_geometry_zeta() ####
     cyl.get_full_geometry()
     cyl.plot_geometry()
     # zeta_trailing_edge_focus, zeta_leading_edge_focus, z_leading_edge_focus, z_trailing_edge_focus = cyl.get_and_plot_foci() ####
@@ -1475,6 +1582,12 @@ if __name__ == "__main__":
             plt.show()
     elif not cyl.is_plot_streamlines and cyl.show_fig:
         plt.show()
+    elif not cyl.is_plot_streamlines and not cyl.show_fig and cyl.save_fig:
+        print("Cyl.D", cyl.D)
+        print("Epsilon", cyl.epsilon)
+        figure_name = "figures/epsilon_" +str(round(cyl.epsilon,3)) + "_xi_" + str(cyl.zeta_center.real) + "_eta_" + str(cyl.zeta_center.imag) + ".svg"
+        plt.savefig(figure_name, dpi=300, bbox_inches=None, pad_inches=0)
+        print("saved figure")
     if cyl.is_plot_shifted_joukowski_cylinder:
         cyl.shift_joukowski_cylinder()
         cyl.plot_shifted_joukowski_cylinder()
@@ -1504,6 +1617,7 @@ if __name__ == "__main__":
         print("Running theta convergence")
         # Conv_d_values = np.array([cyl.D])
         Conv_d_values = np.array([0.001, 0.01, 0.1, 0.2, 0.4, 0.8, 1.0])
+        # Conv_d_values = np.array([0.1])
         romberg_reference_value = 90572.7333392366 # for 17 doubles area int romberg
         Gamma_value = cyl.kutta_circulation
         reference_value = romberg_reference_value # for D=0.001 trap 17 and area int analytic with mult
@@ -1529,24 +1643,21 @@ if __name__ == "__main__":
         cyl.D = 0.1
         cyl.epsilon = cyl.calc_epsilon_from_D(cyl.D)
         romberg_gamma_values = np.array([7.67148849088136]) # for D = 0.1
-        romberg_reference_values = np.array([90572.7333392366]) # for 17 doubles area int romberg
+        romberg_reference_values = np.array([11277.9091200197]) 
         is_relative_error = cyl.grid_conv_is_relative_error
-        Gamma_values = np.array([2.0]) #np.array([10.0])  # for D=0.001 trap 17 and area int analytic with mult
+        Gamma_values = np.array([cyl.kutta_circulation]) #np.array([10.0])  # for D=0.001 trap 17 and area int analytic with mult
         reference_values = romberg_reference_values
-        num_converged_thetas_double = 13
+        num_converged_thetas_double = 7
         num_r_points_start = 10
-        # radial distances should go from 2 to 20 in steps of 1
-        # radial_distances = [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0]
+        radial_distances = [6.0, 11.0, 21.0, 41.0, 81.0, 161.0, 321.0]
+        # radial_distances = [321.0]
         # radial distances from 21 to 40
-        radial_distances = [23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0,31.0,32.0,33.0,34.0,35.0,36.0,37.0,38.0,39.0,40.0]
         is_compare_integrations = False
         for i in range(len(radial_distances)):
             cyl.radial_distance = radial_distances[i]
             cyl.r_convergence(Gamma_values[0], reference_values[0], num_r_points_start = num_r_points_start, theta_start = cyl.num_thetas_start, theta_converged_doubles=num_converged_thetas_double, theta_range = (0.0, 2*np.pi), r_range=(1.0, 350.0), output_dir="Grid_conv", tol=tol, relative_error=is_relative_error, num_double_points=cyl.num_times_r_doubled, is_compare_integrations=is_compare_integrations)
 
-
-
-
+    # cyl.grid_plots()
     # if cyl.is_calc_convergence_to_kutta:
     #     print("r_values: ", r_values)
     #     D_range_first = [0.0001, 0.00099, 0.00001]
